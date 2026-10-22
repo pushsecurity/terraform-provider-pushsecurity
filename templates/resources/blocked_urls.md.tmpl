@@ -1,0 +1,55 @@
+---
+page_title: "pushsecurity_blocked_urls Resource - pushsecurity"
+subcategory: ""
+description: |-
+  Manages the tenant's blocked URL list.
+---
+
+# pushsecurity_blocked_urls (Resource)
+
+{{ .Description | trimspace }}
+
+## Example usage
+
+{{ tffile "examples/resources/pushsecurity_blocked_urls/resource.tf" }}
+
+## Two formats for one value
+
+The API reads and writes this list in different formats, and they are not
+interchangeable:
+
+| | Format | Example |
+| --- | --- | --- |
+| What you write | a pattern | `example.com` |
+| What the API stores and returns | canonical | `*://example.com/*` |
+
+Sending the canonical form back is rejected with `Invalid url pattern`, so the
+list cannot be written back in the form it is read. The provider converts
+between the two, keeps your spelling in `patterns`, and exposes the stored form
+as `canonical_patterns`. A canonical pattern written in `patterns` is accepted
+and converted the same way.
+
+Some consequences worth knowing:
+
+- `example.com`, `example.com/` and `example.com/*` are the same pattern to the
+  API. Having two of them in one configuration is rejected during plan, because
+  only one could ever be stored and the plan would never settle.
+- A query string or fragment stays part of the path, so `example.com?q=1` is
+  stored as `*://example.com/?q=1`.
+- A scheme is rejected during plan, as the API rejects it. Write
+  `example.com`, not `https://example.com`: every pattern matches every scheme.
+- The host is checked during plan against the API's own rules: lower-case
+  letters, digits, hyphens and `*`, with at least one letter, or an IPv4
+  address, optionally with a port. Since a change that removes a pattern
+  rewrites the whole list, a pattern the API rejected at apply could leave the
+  list partly written.
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+{{ codefile "shell" "examples/resources/pushsecurity_blocked_urls/import.sh" }}
+
+Imported state holds the patterns converted back from the canonical form, so
+`example.com/*` comes back as `example.com`. Both mean the same thing; adjust
+the spelling to taste, as the first plan will be empty either way.

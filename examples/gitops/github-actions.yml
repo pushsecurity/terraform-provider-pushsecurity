@@ -1,0 +1,112 @@
+# A review-then-apply pipeline for Push control configuration.
+#
+# Plans run on pull requests with a read-only key, so a compromised pipeline at
+# review time cannot change anything. Applies run only after merge, from a
+# protected environment holding a full-access key.
+#
+# State must outlive the job: configure a remote backend in your root module
+# first (see backend.tf alongside this file). Without one, every run starts from
+# empty state.
+
+name: push-config
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Jobs widen this only where they need to.
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    environment: push-plan # holds the READ-ONLY key
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@v3
+
+      # Pass your backend's credentials to every step that runs terraform.
+      - run: terraform init
+      - run: terraform fmt -check -recursive
+
+      # Catches the API's cross-field rules — "title is required for mode
+      # BLOCK" and the like — on the pull request rather than after merge.
+      - run: terraform validate
+
+      - name: plan
+        env:
+          PUSH_API_KEY: ${{ secrets.PUSH_API_KEY_READ_ONLY }}
+        run: terraform plan -no-color -out=tfplan
+
+      # Rendering a saved plan needs no API key.
+      - name: render the plan
+        run: |
+          {
+            echo '## Terraform plan'
+            echo '```'
+            terraform show -no-color tfplan
+            echo '```'
+          } > plan.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plan
+          path: plan.md
+
+  # Review the diff in the pull request. Rule order is part of the
+  # configuration: a reordered rules list changes which rule matches first.
+  #
+  # A job of its own, so the token that can write to the pull request never
+  # shares a runner with the API key or with terraform evaluating the pull
+  # request's configuration.
+  comment:
+    needs: plan
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: plan
+      - name: comment the plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment "${{ github.event.number }}" --repo "${{ github.repository }}" --body-file plan.md
+
+  apply:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # Require a reviewer on this environment, and hold the FULL-ACCESS key here.
+    environment: push-apply
+    # One apply at a time: the API serialises configuration writes per tenant,
+    # and a second run would fight the first.
+    concurrency: push-apply
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@v3
+
+      # Pass your backend's credentials to every step that runs terraform.
+      - run: terraform init
+
+      # Replan against the tenant as it is now, not as it was when the pull
+      # request was reviewed. The diff is in this job's log.
+      - name: plan
+        env:
+          PUSH_API_KEY: ${{ secrets.PUSH_API_KEY_FULL_ACCESS }}
+        run: terraform plan -no-color -out=tfplan
+
+      # Applying the saved plan writes exactly what the plan printed, and needs
+      # no -auto-approve. Planning in the same job keeps the window between
+      # reading and writing to seconds: there is no optimistic concurrency on
+      # the API, so a console edit inside that window is overwritten.
+      - name: apply
+        env:
+          PUSH_API_KEY: ${{ secrets.PUSH_API_KEY_FULL_ACCESS }}
+        run: terraform apply -no-color tfplan

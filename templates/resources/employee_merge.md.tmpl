@@ -1,0 +1,63 @@
+---
+page_title: "pushsecurity_employee_merge Resource - pushsecurity"
+subcategory: ""
+description: |-
+  Merges an employee's other addresses into the record that represents them.
+---
+
+# pushsecurity_employee_merge (Resource)
+
+{{ .Description | trimspace }}
+
+## Example usage
+
+{{ tffile "examples/resources/pushsecurity_employee_merge/resource.tf" }}
+
+## What this resource can and cannot know
+
+A merge leaves no record. The API reports nothing about it afterwards:
+`knownEmails` holds the distinct addresses of the accounts an employee owns, not
+the employees that were merged into them. A merge moves the secondary's
+accounts onto the primary, so a merged address appears there only if it had
+accounts of its own. Nor does a successful response from the merge endpoint
+confirm that anything was merged, so the provider checks each merge by reading
+the secondary back and expecting it to be gone.
+
+So the invariant this resource keeps is not "these records were merged" but
+**these addresses are not separate employees**, which is observable, and is what
+a merge achieves. Three consequences:
+
+- Every merge is confirmed by reading the secondary back and requiring it to be
+  gone. A `200` on its own is not treated as success.
+- An address the tenant does not hold is a warning, not an error. After a merge
+  that is exactly what it looks like — so this is also what a re-run after
+  losing state looks like, and it does the right thing.
+- An address that comes back, because an HR sync recreated it or somebody
+  signed in with it, shows up in `pending_merges` on the next refresh and is
+  merged again by the next apply.
+
+## Terraform does not undo a merge
+
+`terraform destroy`, and removing an address from `secondary_emails`, stop
+Terraform tracking the merge and warn that the records stay merged.
+
+How far a merge can be reversed depends on what the address had. An address
+that had accounts of its own stays among the primary's known addresses, and can
+be split out again, through the API's `/unmerge` endpoint or by Push support,
+as a licensed employee with a new identifier, which needs a free licence seat:
+the original record and its identifier do not come back. A placeholder
+address, one that had no accounts, leaves nothing behind to split out.
+
+Treat the resource as append-only, and review a plan that merges somebody new as
+carefully as you would a deletion.
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+{{ codefile "shell" "examples/resources/pushsecurity_employee_merge/import.sh" }}
+
+An import adopts the primary only — which addresses were merged into somebody
+is not recorded anywhere the API exposes, so it cannot be discovered. Write
+`secondary_emails` to say what this person's addresses are; the first apply is a
+no-op for the ones that are already merged.

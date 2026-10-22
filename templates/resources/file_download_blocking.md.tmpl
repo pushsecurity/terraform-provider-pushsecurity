@@ -1,0 +1,52 @@
+---
+page_title: "pushsecurity_file_download_blocking Resource - pushsecurity"
+subcategory: ""
+description: |-
+  Manages the file download blocking control.
+---
+
+# pushsecurity_file_download_blocking (Resource)
+
+{{ .Description | trimspace }}
+
+## Example usage
+
+{{ tffile "examples/resources/pushsecurity_file_download_blocking/resource.tf" }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+Import the existing configuration before your first apply, so that the apply is
+a no-op rather than a replacement of whatever is already live.
+
+The recommended route is Terraform's own configuration generation:
+
+```terraform
+import {
+  to       = pushsecurity_file_download_blocking.this
+  provider = pushsecurity
+  id       = "default"
+}
+```
+
+```shell
+terraform plan -generate-config-out=generated.tf
+```
+
+Move the generated resource into your configuration, then **remove the
+`provider` argument from the import block** — Terraform only accepts it on
+import blocks that generate configuration, and leaving it in place fails the
+next plan. Then apply:
+
+```shell
+terraform apply
+```
+
+The generated configuration has `key = null` on every rule, because keys are
+provider-side only and cannot be recovered from the API. Fill them in as part of
+adopting the control; the first apply after doing so is a no-op on the API side.
+
+The CLI form also works:
+
+{{ codefile "shell" "examples/resources/pushsecurity_file_download_blocking/import.sh" }}

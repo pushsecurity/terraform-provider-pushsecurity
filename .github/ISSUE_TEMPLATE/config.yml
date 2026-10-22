@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/pushsecurity/terraform-provider-pushsecurity/security/advisories/new
+    about: Report vulnerabilities privately, never in a public issue. See SECURITY.md.
+  - name: Push Security support
+    url: mailto:support@pushsecurity.com
+    about: Questions about your tenant, the Push platform or the browser extension.

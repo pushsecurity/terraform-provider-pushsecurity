@@ -1,0 +1,125 @@
+# Produces the artefact layout the Terraform Registry expects: one zip per
+# platform, the registry manifest, a SHA256SUMS file covering both, and a
+# detached GPG signature over it.
+#
+# push-tf-bootstrap is built here too, but it is not published by this
+# configuration. The Registry reads every archive SHA256SUMS lists as a
+# provider package, so the bootstrap archives stay out of both the checksums
+# and the provider's release. The release workflow publishes them as a
+# release of their own; see .github/workflows/release.yml.
+version: 2
+
+project_name: terraform-provider-pushsecurity
+
+before:
+  hooks:
+    # Verify rather than tidy: a hook that rewrites go.mod would release from a
+    # tree that differs from the tagged commit. CI already fails an untidy one.
+    - go mod verify
+
+git:
+  # The bootstrap releases' tags point at the same commits as the provider's.
+  # They are not versions of the provider, so keep them out of the previous-tag
+  # lookup the changelog is built from.
+  ignore_tags:
+    - "push-tf-bootstrap-*"
+
+builds:
+  - id: provider
+    main: .
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - "-s -w -X main.version={{.Version}}"
+    # Build timestamps come from the commit, so the same tag rebuilds bit for
+    # bit from a *clean* checkout. Go also stamps the revision and a
+    # vcs.modified flag into the binary, so a dirty tree produces different
+    # bytes and different checksums — release only from CI.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos: [linux, darwin, windows, freebsd]
+    goarch: [amd64, arm64, arm, "386"]
+    ignore:
+      - goos: darwin
+        goarch: "386"
+      - goos: darwin
+        goarch: arm
+      # Go 1.26 removed the windows/arm port.
+      - goos: windows
+        goarch: arm
+    # The registry requires this exact naming.
+    binary: "{{ .ProjectName }}_v{{ .Version }}"
+
+  # push-tf-bootstrap is a separate tool, shipped in its own archive. It must
+  # not go into the provider archive: the registry expects that to contain
+  # exactly one binary, named as above.
+  - id: bootstrap
+    main: ./cmd/push-tf-bootstrap
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - "-s -w"
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    binary: push-tf-bootstrap
+
+archives:
+  - id: provider
+    ids: [provider]
+    formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+  - id: bootstrap
+    ids: [bootstrap]
+    formats: [zip]
+    name_template: "push-tf-bootstrap_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
+  algorithm: sha256
+  ids: [provider]
+  # The Registry reads the protocol version from the manifest, and assumes
+  # protocol 5 without it. This provider speaks protocol 6.
+  extra_files:
+    - glob: terraform-registry-manifest.json
+      name_template: "{{ .ProjectName }}_{{ .Version }}_manifest.json"
+
+signs:
+  - artifacts: checksum
+    args:
+      - "--batch"
+      - "--local-user"
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - "--output"
+      - "${signature}"
+      - "--detach-sign"
+      - "${artifact}"
+
+release:
+  # The registry reads the changelog from the GitHub release body.
+  draft: false
+  # Betas are published as ordinary GitHub releases, not prereleases: the
+  # version string is what tells Terraform and the Registry they are betas.
+  prerelease: "false"
+  header: |
+    **Experimental.** The Push Security provider is not yet generally available
+    or officially supported, and may change between releases without a
+    deprecation period. Contact support@pushsecurity.com before you rely on it.
+  ids: [provider]
+  extra_files:
+    - glob: terraform-registry-manifest.json
+      name_template: "{{ .ProjectName }}_{{ .Version }}_manifest.json"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    # Subjects say what changed for a user, so most stay in. CI changes and
+    # the merge of each release pull request do not.
+    exclude:
+      - "^ci:"
+      - "^Merge (pull request|branch) "

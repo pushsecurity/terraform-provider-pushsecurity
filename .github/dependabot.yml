@@ -1,0 +1,27 @@
+version: 2
+updates:
+  # Actions are pinned to commit SHAs, so this is what moves them forward.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    # Indirect requirements too. gRPC and the golang.org/x modules are linked
+    # into the provider binary, and the plugin libraries can lag their
+    # security releases by months.
+    allow:
+      - dependency-type: all
+    groups:
+      # The plugin framework, plugin-go and plugin-testing move together.
+      terraform-plugin:
+        patterns: ["github.com/hashicorp/terraform-plugin-*"]
+      # Everything else, in one weekly pull request rather than one each.
+      go-modules:
+        patterns: ["*"]

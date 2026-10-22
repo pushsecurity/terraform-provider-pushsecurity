@@ -1,0 +1,53 @@
+---
+page_title: "pushsecurity_custom_detection Resource - pushsecurity"
+subcategory: ""
+description: |-
+  Manages a custom detection and the rules that act on it.
+---
+
+# pushsecurity_custom_detection (Resource)
+
+{{ .Description | trimspace }}
+
+## Example usage
+
+{{ tffile "examples/resources/pushsecurity_custom_detection/resource.tf" }}
+
+With `detections/torrent-website-visit.yaml`:
+
+{{ codefile "yaml" "examples/resources/pushsecurity_custom_detection/detections/torrent-website-visit.yaml" }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Renaming replaces the detection
+
+The API derives the detection's permanent identifier from its name, and
+neither can be changed afterwards, so this provider treats `name` as forcing
+replacement: changing it destroys the detection and creates a new one, so the
+rules inside it are recreated too and get new identifiers.
+
+## If an apply times out
+
+Creating a detection is not idempotent, so it is not retried after a timeout:
+a timeout may mean the detection was created anyway. The next apply
+then fails with `CUSTOM_DETECTION_ALREADY_EXISTS`, and the diagnostic gives you
+the import block to adopt it.
+
+## Import
+
+{{ codefile "shell" "examples/resources/pushsecurity_custom_detection/import.sh" }}
+
+Or with an import block, which also lets Terraform generate the configuration:
+
+```terraform
+import {
+  to       = pushsecurity_custom_detection.torrent_website_visit
+  provider = pushsecurity
+  id       = "CUSTOM_TORRENT_WEBSITE_VISIT"
+}
+```
+
+Remove the `provider` argument before applying — Terraform only accepts it on
+import blocks that generate configuration.
+
+Use the `pushsecurity_custom_detections` data source to list what a tenant already has.

@@ -1,0 +1,96 @@
+---
+page_title: "A review-then-apply pipeline"
+subcategory: ""
+description: |-
+  Running the provider so that control changes go through pull request and review.
+---
+
+# A review-then-apply pipeline
+
+~> The Push Security provider is experimental: not yet generally available or
+officially supported, and it may change between releases. Contact
+support@pushsecurity.com before you rely on it. See the
+[provider overview](https://registry.terraform.io/providers/pushsecurity/pushsecurity/latest/docs).
+
+The reason to manage Push configuration with Terraform is that changes become
+reviewable: a proposed change to a blocking rule shows up as a diff, someone
+approves it, and the history is in git. This guide covers the parts of that
+which are specific to this provider.
+
+## Two keys
+
+The API distinguishes read-only from full-access keys, and that maps onto the
+pipeline directly:
+
+| Stage | Key | Why |
+| --- | --- | --- |
+| Pull request — `terraform plan` | **read-only** | A plan only reads. A compromised pipeline at this stage cannot change your controls. |
+| Merge to main — `terraform apply` | **full access** | Held in a protected environment, used only after review. |
+
+Create both under Settings in the Push admin console. Pass them as
+`PUSH_API_KEY`; never put a key in configuration, where it would end up in
+plan files and in git.
+
+## State
+
+Each pipeline run starts on a fresh runner, so state has to live in a remote
+backend. Without one, every run starts from empty state: the plan shows every
+resource as new, and the apply writes each control's whole configuration over
+whatever is live without showing you what it replaces, and creates each custom
+detection again.
+
+{{ tffile "examples/gitops/backend.tf" }}
+
+The plan and apply jobs both need the backend. The pull request plan only
+reads state, but it takes the state lock unless you pass `-lock=false`, so give
+it access to the lock too. Only the apply writes state.
+
+State holds your complete control configuration and the employee email
+addresses your criteria name, so keep it private and encrypted at rest.
+
+## A reference workflow
+
+{{ codefile "yaml" "examples/gitops/github-actions.yml" }}
+
+The pull request plan is for review. The apply job does not reuse it: by the
+time the change merges, someone may have edited the tenant or merged another
+change, so it plans again and applies exactly that saved plan, seconds later.
+Its log shows the diff it applied.
+
+## What a plan cannot tell you
+
+Two limitations to plan around.
+
+**A console edit between plan and apply is overwritten.** There is no
+version or `If-Match` on the configuration endpoints, so the provider cannot
+detect that someone changed a control after your plan was generated. Your apply
+replaces the whole document and their change disappears. Keep the window
+between plan and apply short by applying a plan file produced moments earlier,
+as the reference workflow does.
+
+The API *does* detect two simultaneous writes — it answers the loser with `409
+CONCURRENT_MODIFICATION`, which the provider retries — but that is a different
+problem from a sequential edit you never saw.
+
+**Some rules are only checked at apply.** The API has no dry-run endpoint. The
+provider mirrors its cross-field rules during plan, so most mistakes fail on the
+pull request, but anything the provider does not know about surfaces as a
+rejected apply after merge. When that happens the diagnostic names the rule and
+the field.
+
+## Ordering and parallelism
+
+Rules within a control are evaluated in the order you write them and the first
+match wins, so the order of the `rules` list is part of your configuration —
+review it as such.
+
+Across controls, Terraform applies resources in parallel and the API serialises
+configuration writes per tenant. The provider retries the resulting conflicts
+with jittered backoff, so no special `-parallelism` setting is needed.
+
+## Blocked URLs are not atomic
+
+`pushsecurity_blocked_urls` is the one resource whose API has no bulk replace, so
+changing it deletes the whole list and re-adds it entry by entry. Blocking is
+degraded while that runs — roughly a second per entry. Schedule changes to large
+lists accordingly.

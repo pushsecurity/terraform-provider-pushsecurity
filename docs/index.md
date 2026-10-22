@@ -1,0 +1,136 @@
+---
+page_title: "Push Security Provider"
+description: |-
+  Experimental: manage Push Security control configuration as code. Not yet generally available or officially supported.
+---
+
+# Push Security Provider
+
+~> **This provider is experimental.** Push Security publishes it to find out
+how useful managing Push configuration as code is to customers. It is not
+generally available and not yet officially supported. Resources, attributes and
+behaviour may change between releases without a deprecation period, and every
+release is a beta (`0.x.y-beta.N`) until that changes. If you would like to use
+it, contact Push Security support at support@pushsecurity.com first.
+
+Manages Push Security control configuration, so that changes to your controls go
+through pull request and review, and their history and rollback come from git.
+
+Most of the provider is controls. The exceptions are the employee resources —
+`pushsecurity_employee`, `pushsecurity_employee_merge` and `pushsecurity_employee_merge_rule` — which
+manage the people your controls are scoped by. They answer "what happens to
+something I did in the console?" differently from the controls, and differently
+from each other, so that question is worth settling up front. `pushsecurity_settings`,
+which holds the domains Push monitors as your organisation's, answers it in a
+way of its own too.
+
+## Whole-control ownership
+
+Each control resource owns its control's configuration **in full**. The
+underlying API replaces the whole document on every write: any rule absent from
+your configuration is deleted. A control is therefore either managed by
+Terraform or managed in the console — never both at once.
+
+Adopt one control at a time. Import what is already there first (see
+[Importing existing configuration](#importing-existing-configuration)) so your
+first apply is a no-op.
+
+## What an apply does to things you did not write down
+
+| You create this in the console, and it is not in your configuration | `terraform apply` |
+| --- | --- |
+| A rule in a control that Terraform manages | **Deletes it.** The control is one document and your configuration is the whole of it |
+| An employee | **Leaves it alone.** No resource names it, so nothing touches it |
+| An employee whose address matches a `pushsecurity_employee_merge_rule` pattern | **Merges it**, with no change to your configuration. A merge can be undone only in part |
+| A monitored domain, while `pushsecurity_settings` sets `monitored_domains` | **Removes it**, and unmarks the accounts on it. The plan warns first |
+
+The lines are three different ownership models, and the third one inverts the
+usual risk:
+
+- A **control** resource is the complete truth about that control. Absent from
+  configuration means deleted, which is why you import before your first apply.
+  `monitored_domains` is the same, with one difference: destroying
+  `pushsecurity_settings` leaves the settings as they are.
+- **`pushsecurity_employee`** and **`pushsecurity_employee_merge`** name individuals. Your
+  configuration is a *subset* of the tenant, and anything outside it is
+  invisible to an apply. Deleting a `pushsecurity_employee` block does not unlicense
+  anybody either — see that resource's page for why removing a licence is
+  treated as a destructive operation rather than a reversible one.
+- **`pushsecurity_employee_merge_rule`** is a *policy*. Absent from your configuration
+  does not mean safe, it means eligible: an address that appears in the tenant
+  next month and matches the pattern is merged by the next apply, and a merge
+  can be undone only in part.
+
+So a pull request against a rule can be empty and the apply can still do
+something. That is what `pending_merges` and `merged` are for — a plan names
+every pair before it merges it — and it is the argument for running `terraform
+plan` on a schedule rather than only when somebody edits a file.
+
+## Rules are ordered
+
+Rules within a control are evaluated in the order you write them and the first
+match wins, so the order of the `rules` list is part of your configuration, not
+an implementation detail.
+
+## Example usage
+
+Every release is a beta, and Terraform only installs a beta when its version is
+pinned exactly, so name the release you want and move to a newer one
+deliberately.
+
+```terraform
+terraform {
+  required_version = ">= 1.8"
+
+  required_providers {
+    pushsecurity = {
+      source = "pushsecurity/pushsecurity"
+      # Every release is a beta while the provider is experimental, and
+      # Terraform only installs a beta when it is pinned exactly.
+      version = "0.1.0-beta.1"
+    }
+  }
+}
+
+# The API key is read from the PUSH_API_KEY environment variable. Prefer that
+# over setting api_key here: a key in configuration is a key in plan files and,
+# usually, in version control.
+provider "pushsecurity" {}
+```
+
+## Read-only keys for plan, full-access keys for apply
+
+The API distinguishes read-only from full-access keys, which maps onto a GitOps
+pipeline directly:
+
+- **Pull request** — `terraform plan` with a **read-only** key. A plan needs
+  only reads, so a compromised pipeline at this stage cannot change anything.
+- **Merge to main** — `terraform apply` with a **full-access** key, held in a
+  protected environment.
+
+<!-- schema generated by tfplugindocs -->
+## Schema
+
+### Optional
+
+- `api_key` (String, Sensitive) API key for the Push Security API. May also be set with the `PUSH_API_KEY` environment variable, which is the recommended way to supply it: a key in configuration ends up in plan files and in version control.
+
+A read-only key is enough for `terraform plan` and refresh; `terraform apply` needs a full-access key. That split is what makes a plan-on-pull-request, apply-on-merge pipeline safe.
+- `base_url` (String) Base URL of the Push Security API. Defaults to `https://api.pushsecurity.com`. May also be set with the `PUSH_BASE_URL` environment variable. Only set this to target a non-production environment.
+
+## Importing existing configuration
+
+Control configuration resources are singletons: there is one file download
+blocking configuration per tenant, not many. Import accepts any string as the
+identifier, which by convention is `default`:
+
+```terraform
+import {
+  to = pushsecurity_file_download_blocking.this
+  id = "default"
+}
+```
+
+Run `terraform plan -generate-config-out=generated.tf` to have Terraform write
+the matching configuration for you, then check that a second plan is empty
+before you commit.

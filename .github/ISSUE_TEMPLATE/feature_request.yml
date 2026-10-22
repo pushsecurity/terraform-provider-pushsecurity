@@ -1,0 +1,21 @@
+name: Feature request
+description: A resource, attribute or behaviour the provider does not have yet.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The configuration you want to manage, and why doing it in Terraform matters to you.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like the provider to do
+      description: An example configuration is the most useful thing you can include.
+      render: hcl
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do instead today

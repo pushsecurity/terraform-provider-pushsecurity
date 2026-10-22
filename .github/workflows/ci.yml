@@ -1,0 +1,186 @@
+name: ci
+
+# Work lands on development, the default branch, so pull requests into it get
+# every check that needs no tenant. A release is a pull request from
+# development into main, and that pull request is where the acceptance tests
+# run too. Release tags are cut on main. The push to main after the merge
+# repeats the checks that need no tenant.
+on:
+  pull_request:
+    branches: [development, main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Concurrency is set per job rather than for the workflow, because cancelling
+# a superseded run is right for the quick checks and wrong for the acceptance
+# tests, which would leave the tenant half-written.
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ci-build-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # This job owns the Go cache. setup-go keeps one cache per go.sum, saved by
+      # whichever job finishes first, and only this one compiles the race-built
+      # tests that the acceptance job then needs. The other jobs leave it alone.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - run: go build ./...
+      - run: go vet ./...
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt'd:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      # The offline tests drive the Terraform CLI against a stub tenant. With
+      # no terraform on PATH, the test harness downloads the latest release
+      # afresh for every test case, which takes the provider package past the
+      # test timeout.
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.16.*"
+          terraform_wrapper: false
+
+      # Unit tests only: TF_ACC is unset, so nothing touches a real tenant.
+      - name: test
+        run: go test -race ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ci-lint-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.2
+      # The examples are rendered into docs/, so an unformatted one is
+      # published as written. `make lint` runs the same check.
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_wrapper: false
+      - name: examples are terraform fmt'd
+        run: terraform fmt -check -recursive ./examples
+
+  # Fails on a known vulnerability the provider's code can reach, in a module or
+  # in the standard library. The latter means the go directive in go.mod, which
+  # fixes the toolchain CI and releases build with, is behind a Go security
+  # release: raise it to the fixed patch version.
+  vulncheck:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ci-vulncheck-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  docs:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ci-docs-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_wrapper: false
+      # Pinned, and must track TFPLUGINDOCS_VERSION in
+      # .devcontainer/post-create.sh: a new release changes the generated
+      # output, which would fail this check on unrelated pull requests.
+      - name: docs/ is up to date
+        run: |
+          go run github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@v0.25.0 generate --provider-name pushsecurity
+          # status, not diff: a new page is untracked, and diff ignores it.
+          if [ -n "$(git status --porcelain -- docs/)" ]; then
+            git status --short -- docs/
+            echo "docs/ is stale: run 'make docs' and commit the result"; exit 1
+          fi
+
+  # The provider is only useful if Terraform itself can drive it, so the matrix
+  # covers the oldest supported Terraform and the current release.
+  acceptance:
+    runs-on: ubuntu-latest
+    # Acceptance tests replace whole control configurations in a real tenant, so
+    # they run against a dedicated test tenant and never on pull requests from
+    # forks, which cannot be trusted with the credentials. They run on the
+    # release pull request into main only: the merge that follows changes
+    # nothing they test.
+    if: >-
+      github.event_name == 'pull_request'
+      && github.base_ref == 'main'
+      && github.event.pull_request.head.repo.full_name == github.repository
+    environment: acceptance-tests
+    needs: [build]
+    # A shared test tenant cannot support concurrent runs: every test PUTs a
+    # whole control. One run at a time across every pull request. A run in
+    # progress is never cancelled; the newest waiting run goes next.
+    concurrency:
+      group: acceptance-tenant
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      # One Terraform version at a time, for the same reason.
+      max-parallel: 1
+      matrix:
+        terraform: ["1.8.*", "1.16.*"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ matrix.terraform }}
+          terraform_wrapper: false
+      # Only the tests that need the tenant: the build job has run the rest.
+      # -v shows each test as it finishes and how long it took, as long as the
+      # command names a single package: given several, go test holds back each
+      # package's output until that package has finished. The API applies a
+      # tenant's configuration writes one at a time, so past four parallel
+      # tests the extra ones mostly queue there. Which tests run in parallel,
+      # and why that is safe, is in TestAccAllControls_smoke.
+      - name: acceptance tests
+        env:
+          TF_ACC: "1"
+          PUSH_API_KEY: ${{ secrets.PUSH_API_KEY }}
+          PUSH_BASE_URL: ${{ vars.PUSH_BASE_URL }}
+          # The employee merge and licensing tests skip unless this is set,
+          # because merging cannot be undone and an employee cannot be deleted
+          # — unlicensing is the only way to remove one, and it only works
+          # while they have no accounts. They create their own employees and
+          # leave no records behind, so a dedicated test tenant can run them:
+          # set PUSH_ACC_MERGE to 1 as a variable on the acceptance-tests
+          # environment. Unset, the merge resources get unit coverage only.
+          PUSH_ACC_MERGE: ${{ vars.PUSH_ACC_MERGE }}
+        run: go test -race -v -parallel 4 -timeout 30m -run '^TestAcc' ./internal/provider

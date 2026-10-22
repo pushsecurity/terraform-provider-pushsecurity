@@ -1,0 +1,82 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # The signing key's secrets live in this environment, which only v* tags
+    # may deploy to, so no other workflow or branch can read them.
+    environment: release
+    steps:
+      # Until the provider is generally available, every release is a beta.
+      # Terraform skips prereleases unless pinned exactly, so this keeps
+      # anyone from picking up an experimental release by accident.
+      - name: tag is a beta
+        run: |
+          if ! [[ "$GITHUB_REF_NAME" =~ ^v0\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
+            echo "::error::$GITHUB_REF_NAME is not a beta tag (v0.x.y-beta.N)"
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The registry verifies the signature on the checksums file, so the key
+      # must be an organisation key held in repository secrets, not an
+      # individual's.
+      - name: import gpg key
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
+        id: import_gpg
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      # The action is pinned by SHA, but it downloads goreleaser itself at the
+      # version named here, so pin that exactly too: this job holds the signing
+      # key. Dependabot does not move it.
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          version: v2.18.3
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
+
+      # goreleaser built the push-tf-bootstrap archives but left them out of
+      # the provider's release, which the Registry reads. They get a release of
+      # their own, push-tf-bootstrap-<tag>, on the same commit, with their own
+      # checksums signed by the same key. It is never marked latest, so the
+      # repository's latest release stays the provider's.
+      - name: release push-tf-bootstrap
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
+          TAG: push-tf-bootstrap-${{ github.ref_name }}
+        working-directory: dist
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          sums="push-tf-bootstrap_${version}_SHA256SUMS"
+          sha256sum push-tf-bootstrap_"${version}"_*.zip > "$sums"
+          gpg --batch --local-user "$GPG_FINGERPRINT" --detach-sign --output "$sums.sig" "$sums"
+          set -- push-tf-bootstrap_"${version}"_*.zip "$sums" "$sums.sig"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # A rerun replaces the assets of the release the first run made.
+            gh release upload "$TAG" --clobber "$@"
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" --latest=false \
+              --title "push-tf-bootstrap $version" \
+              --notes "push-tf-bootstrap $version, the adoption tool for the Push Terraform provider, built from the same commit as $GITHUB_REF_NAME." \
+              "$@"
+          fi

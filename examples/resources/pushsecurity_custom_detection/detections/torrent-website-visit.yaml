@@ -1,0 +1,6 @@
+input: web_request
+metadata:
+  indicator: TORRENT_MAGNET_LINK_DETECTED
+conditions:
+  request_url:
+    scheme: magnet

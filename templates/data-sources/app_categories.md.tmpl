@@ -1,0 +1,35 @@
+---
+page_title: "pushsecurity_app_categories Data Source - pushsecurity"
+subcategory: ""
+description: |-
+  Resolves app category names to the codes the app_categories criterion matches on.
+---
+
+# pushsecurity_app_categories (Data Source)
+
+{{ .Description | trimspace }}
+
+## Why this exists
+
+The `app_categories` criterion matches on numeric category codes. A rule that
+says `matches = ["34"]` is unreviewable: nobody reading the pull request knows
+what category 34 is. This data source turns it into
+`codes_by_name["Information Technology"]`.
+
+## Example usage
+
+{{ tffile "examples/data-sources/pushsecurity_app_categories/data-source.tf" }}
+
+## Derived, not authoritative
+
+There is no API that lists the category catalogue. The app inventory reports
+each app's categories with both code and name, so this data source derives the
+mapping from the apps in the tenant — which means **a category that no app in
+the tenant belongs to does not appear here**.
+
+That is a real limitation, but a safe one: Terraform fails on a missing map key,
+so looking up an absent category fails during plan with a clear error rather
+than silently producing an empty criterion. Use the `categories` attribute to
+see what is resolvable.
+
+{{ .SchemaMarkdown | trimspace }}

@@ -1,0 +1,64 @@
+---
+page_title: "pushsecurity_employee Resource - pushsecurity"
+subcategory: ""
+description: |-
+  Manages an employee record and whether they hold a Push licence.
+---
+
+# pushsecurity_employee (Resource)
+
+{{ .Description | trimspace }}
+
+## Example usage
+
+{{ tffile "examples/resources/pushsecurity_employee/resource.tf" }}
+
+## Removing a licence is not the opposite of granting one
+
+Granting a licence is ordinary and reversible. Removing one is neither: the API
+deletes the employee record, every account Push holds for that employee,
+every finding raised against them, and their browsers.
+
+An ordinary Terraform resource reaches that two ways without anybody typing it —
+`terraform destroy`, and a resource block deleted from a file — so this one does
+not behave like an ordinary resource:
+
+| What you do | What happens |
+| --- | --- |
+| `licensed = true` | The licence is granted |
+| `licensed = false` | **Refused during plan**, unless `allow_unlicense = true` is set beside it |
+| Remove the resource from your configuration | Terraform stops managing the employee. Nothing is unlicensed |
+| `terraform destroy` | The same: a warning, and no change to the employee |
+| `licensed = false` for an address the tenant does not hold | Nothing is sent. The resource is satisfied, with a null `employee_id`, and a warning says the block can be removed |
+
+To decommission somebody, apply `licensed = false` with `allow_unlicense = true`
+and read the warning it prints, then remove the resource. Doing it in that order
+means the destructive step is a thing you asked for and reviewed, rather than a
+side effect of tidying up a configuration.
+
+The block does not have to be removed straight away. Unlicensing deletes the
+employee record, so after that apply the address is no longer in the tenant.
+The resource treats that as the state it asked for: a
+refresh keeps it, with `employee_id` null, and later plans are empty rather than
+proposing to create the employee only to unlicense them again. The same holds
+for a block written for an address that was never there. While the block stays,
+it still means what it says: an employee who reappears at that address, from a
+directory sync for instance, is unlicensed again by the next apply.
+
+## Do not manage an address that a merge rule will merge
+
+An address merged into somebody else stops existing as an employee. If a
+`pushsecurity_employee` resource still manages that address, the next plan proposes to
+**create it again** — and a
+[`pushsecurity_employee_merge_rule`](employee_merge_rule) will merge it again on the
+apply after that, forever.
+
+Manage the people, not their aliases. If you created aliases deliberately — to
+seed a test tenant, say — remove those resources from the configuration once the
+merge has happened.
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+{{ codefile "shell" "examples/resources/pushsecurity_employee/import.sh" }}

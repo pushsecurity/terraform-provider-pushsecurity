@@ -1,0 +1,71 @@
+---
+page_title: "pushsecurity_employee_merge_rule Resource - pushsecurity"
+subcategory: ""
+description: |-
+  Merges employees by the shape of their addresses rather than by naming them.
+---
+
+# pushsecurity_employee_merge_rule (Resource)
+
+{{ .Description | trimspace }}
+
+## Example usage
+
+{{ tffile "examples/resources/pushsecurity_employee_merge_rule/resource.tf" }}
+
+## How matching works
+
+Each pattern is filled in from an employee's own address — `{local}` and
+`{domain}` — and the result is looked for in the tenant. Matching in that
+direction, rather than testing every address against a wildcard, is what lets a
+match say *whose* address it is: `ada.lovelace.admin@example.com` is only a
+merge candidate because `ada.lovelace@example.com` exists.
+
+Two cases are deliberately refused rather than guessed:
+
+- **Aliases do not chain.** An employee whose own address matches a pattern is
+  never treated as an owner, so `a.admin@` does not acquire `a.admin.admin@` in
+  the same apply that merges it into `a@`.
+- **An address two people could claim is an error.** The plan fails naming both,
+  and the address is left alone until a `pushsecurity_employee_merge` resource or
+  `exclude_emails` settles it.
+
+## Reviewing what a rule will do
+
+A rule's effects are not written down in the configuration, so they are put in
+the plan instead. `merged` holds every pair the rule has merged, as
+`secondary -> primary`, and the pairs the apply is about to add appear as
+additions:
+
+```text
+  ~ resource "pushsecurity_employee_merge_rule" "admin_aliases" {
+      ~ merged = [
+          + "ada.lovelace.admin@example.com -> ada.lovelace@example.com",
+        ]
+    }
+```
+
+`max_merges` bounds one apply. A rule that suddenly matches far more than
+expected — a pattern typo, a new domain arriving in the tenant — fails the plan
+and lists the pairs rather than merging them, because Terraform does not undo a
+merge, and an address that had no accounts cannot be split out again at all.
+
+`pending_merges` is what makes a returning address a change at all: a refresh
+puts it there, and the plan empties it again.
+
+## Aliases and `pushsecurity_employee` do not mix
+
+A merged address stops existing as an employee. A `pushsecurity_employee` resource that
+manages one will therefore propose to create it again on the next plan, and this
+rule will merge it again on the apply after that — a loop that consumes a licence
+each time round. Manage people with `pushsecurity_employee`; leave their aliases to the
+rule.
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Not importable
+
+There is nothing to import: a rule is a statement about shapes, and the merges
+it has performed are not recorded anywhere the API exposes. Adopting a tenant
+that was merged by hand means writing the rule and letting the first plan show
+whatever is left outstanding — which, for addresses already merged, is nothing.

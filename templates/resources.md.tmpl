@@ -1,0 +1,51 @@
+---
+page_title: "{{ .Name }} Resource - {{ .ProviderName }}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{ .Name }} (Resource)
+
+{{ .Description | trimspace }}
+
+{{ if .HasExample -}}
+## Example usage
+
+{{ tffile .ExampleFile }}
+{{- end }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+Import the existing configuration before your first apply, so that the apply is
+a no-op rather than a replacement of whatever is already live.
+
+```terraform
+import {
+  to       = {{ .Name }}.this
+  provider = {{ .ProviderShortName }}
+  id       = "default"
+}
+```
+
+```shell
+terraform plan -generate-config-out=generated.tf
+```
+
+Move the generated resource into your configuration, then **remove the
+`provider` argument from the import block** — Terraform only accepts it on
+import blocks that generate configuration, and leaving it in place fails the
+next plan. Then run `terraform apply` to record the import.
+
+Two things to expect:
+
+- Generated rules have `key = null`, because keys are provider-side only and
+  cannot be recovered from the API. Fill them in while adopting the control;
+  the first apply after doing so is a no-op on the API.
+- The API can return configuration that it rejects on write, so an import can
+  produce a zero-diff plan and still fail validation on a later apply. This
+  provider checks the API's cross-field rules during plan, so such rules are
+  reported against the offending attribute before anything is
+  written. Fix them as part of adoption.

@@ -1,0 +1,16 @@
+# Built binaries (`make build`). Anchored, so cmd/push-tf-bootstrap/ is not
+# ignored with them.
+/terraform-provider-pushsecurity
+/push-tf-bootstrap
+
+# goreleaser output
+dist/
+
+# Terraform working files from manual testing
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+
+# Local overrides
+.env
