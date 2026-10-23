@@ -31,5 +31,5 @@ First public release.
 ### Tools
 
 - `push-tf-bootstrap`, which surveys an existing tenant and writes the import
-  blocks and detection logic files to adopt it. It is released alongside each
-  provider version as `push-tf-bootstrap-v<version>`.
+  blocks and detection logic files to adopt it. Its archives are attached to
+  each provider release.

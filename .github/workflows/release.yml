@@ -55,28 +55,20 @@ jobs:
           GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
 
       # goreleaser built the push-tf-bootstrap archives but left them out of
-      # the provider's release, which the Registry reads. They get a release of
-      # their own, push-tf-bootstrap-<tag>, on the same commit, with their own
-      # checksums signed by the same key. It is never marked latest, so the
-      # repository's latest release stays the provider's.
-      - name: release push-tf-bootstrap
+      # the provider's checksums, which the Registry reads. Attach them to the
+      # provider's release with checksums of their own, signed by the same key.
+      # They cannot have a release of their own: the Registry takes every
+      # release in this repository for a provider version.
+      - name: attach push-tf-bootstrap
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
-          TAG: push-tf-bootstrap-${{ github.ref_name }}
         working-directory: dist
         run: |
           version="${GITHUB_REF_NAME#v}"
           sums="push-tf-bootstrap_${version}_SHA256SUMS"
           sha256sum push-tf-bootstrap_"${version}"_*.zip > "$sums"
           gpg --batch --local-user "$GPG_FINGERPRINT" --detach-sign --output "$sums.sig" "$sums"
-          set -- push-tf-bootstrap_"${version}"_*.zip "$sums" "$sums.sig"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            # A rerun replaces the assets of the release the first run made.
-            gh release upload "$TAG" --clobber "$@"
-          else
-            gh release create "$TAG" --target "$GITHUB_SHA" --latest=false \
-              --title "push-tf-bootstrap $version" \
-              --notes "push-tf-bootstrap $version, the adoption tool for the Push Terraform provider, built from the same commit as $GITHUB_REF_NAME." \
-              "$@"
-          fi
+          # --clobber lets a rerun replace what the first run uploaded.
+          gh release upload "$GITHUB_REF_NAME" --clobber \
+            push-tf-bootstrap_"${version}"_*.zip "$sums" "$sums.sig"

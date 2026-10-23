@@ -4,9 +4,9 @@
 #
 # push-tf-bootstrap is built here too, but it is not published by this
 # configuration. The Registry reads every archive SHA256SUMS lists as a
-# provider package, so the bootstrap archives stay out of both the checksums
-# and the provider's release. The release workflow publishes them as a
-# release of their own; see .github/workflows/release.yml.
+# provider package, so the bootstrap archives stay out of the checksums. The
+# release workflow attaches them to the provider's release afterwards, with
+# checksums of their own; see .github/workflows/release.yml.
 version: 2
 
 project_name: terraform-provider-pushsecurity
@@ -16,13 +16,6 @@ before:
     # Verify rather than tidy: a hook that rewrites go.mod would release from a
     # tree that differs from the tagged commit. CI already fails an untidy one.
     - go mod verify
-
-git:
-  # The bootstrap releases' tags point at the same commits as the provider's.
-  # They are not versions of the provider, so keep them out of the previous-tag
-  # lookup the changelog is built from.
-  ignore_tags:
-    - "push-tf-bootstrap-*"
 
 builds:
   - id: provider
