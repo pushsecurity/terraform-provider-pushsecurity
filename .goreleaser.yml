@@ -6,7 +6,9 @@
 # configuration. The Registry reads every archive SHA256SUMS lists as a
 # provider package, so the bootstrap archives stay out of the checksums. The
 # release workflow attaches them to the provider's release afterwards, with
-# checksums of their own; see .github/workflows/release.yml.
+# checksums of their own; see .github/workflows/release.yml. They are tarballs,
+# not zips: the Registry rejects a release holding any zip that SHA256SUMS does
+# not list.
 version: 2
 
 project_name: terraform-provider-pushsecurity
@@ -66,9 +68,11 @@ archives:
     formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
+  # Not zip, on any platform; see the note at the top. Windows has shipped tar
+  # since Windows 10.
   - id: bootstrap
     ids: [bootstrap]
-    formats: [zip]
+    formats: [tar.gz]
     name_template: "push-tf-bootstrap_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:

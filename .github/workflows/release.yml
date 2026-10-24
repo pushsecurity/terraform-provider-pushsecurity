@@ -58,7 +58,9 @@ jobs:
       # the provider's checksums, which the Registry reads. Attach them to the
       # provider's release with checksums of their own, signed by the same key.
       # They cannot have a release of their own: the Registry takes every
-      # release in this repository for a provider version.
+      # release in this repository for a provider version. And they are
+      # tarballs because it also rejects a release holding any zip the
+      # provider's checksums do not list.
       - name: attach push-tf-bootstrap
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -67,8 +69,8 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           sums="push-tf-bootstrap_${version}_SHA256SUMS"
-          sha256sum push-tf-bootstrap_"${version}"_*.zip > "$sums"
+          sha256sum push-tf-bootstrap_"${version}"_*.tar.gz > "$sums"
           gpg --batch --local-user "$GPG_FINGERPRINT" --detach-sign --output "$sums.sig" "$sums"
           # --clobber lets a rerun replace what the first run uploaded.
           gh release upload "$GITHUB_REF_NAME" --clobber \
-            push-tf-bootstrap_"${version}"_*.zip "$sums" "$sums.sig"
+            push-tf-bootstrap_"${version}"_*.tar.gz "$sums" "$sums.sig"
