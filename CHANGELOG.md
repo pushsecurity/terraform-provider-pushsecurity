@@ -32,4 +32,5 @@ First public release.
 
 - `push-tf-bootstrap`, which surveys an existing tenant and writes the import
   blocks and detection logic files to adopt it. Each provider release carries
-  a `push-tf-bootstrap` `.tar.gz` archive per platform.
+  a binary of it per platform, named
+  `terraform-provider-pushsecurity-bootstrap_<version>_<os>_<arch>`.
