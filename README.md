@@ -100,9 +100,11 @@ remaining steps; there is one Terraform quirk in the middle worth reading about.
 
 To get `push-tf-bootstrap`, download it from the GitHub
 [releases](https://github.com/pushsecurity/terraform-provider-pushsecurity/releases):
-each provider release carries a `push-tf-bootstrap` `.tar.gz` archive per
-platform, with signed checksums of its own. Unpack it with `tar -xzf`, which
-Windows also ships. With a Go toolchain, you can instead install it from source:
+each provider release carries a binary of it per platform, named
+`terraform-provider-pushsecurity-bootstrap_<version>_<os>_<arch>` (with `.exe`
+on Windows) and listed in the release's signed `SHA256SUMS`. Rename it to
+`push-tf-bootstrap`, and on macOS and Linux make it executable with
+`chmod +x`. With a Go toolchain, you can instead install it from source:
 
 ```shell
 go install github.com/pushsecurity/terraform-provider-pushsecurity/cmd/push-tf-bootstrap@latest

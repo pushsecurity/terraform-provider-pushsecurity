@@ -2,13 +2,12 @@
 # platform, the registry manifest, a SHA256SUMS file covering both, and a
 # detached GPG signature over it.
 #
-# push-tf-bootstrap is built here too, but it is not published by this
-# configuration. The Registry reads every archive SHA256SUMS lists as a
-# provider package, so the bootstrap archives stay out of the checksums. The
-# release workflow attaches them to the provider's release afterwards, with
-# checksums of their own; see .github/workflows/release.yml. They are tarballs,
-# not zips: the Registry rejects a release holding any zip that SHA256SUMS does
-# not list.
+# push-tf-bootstrap ships in the same release, as bare binaries that SHA256SUMS
+# also lists. The Registry rejects a release holding any per-platform file,
+# zipped or not, that SHA256SUMS does not list, so the bootstrap files cannot
+# carry checksums of their own or ride in a release of their own. Listing bare
+# binaries, named after the provider, is a layout published providers already
+# ship through the Registry.
 version: 2
 
 project_name: terraform-provider-pushsecurity
@@ -46,8 +45,8 @@ builds:
     # The registry requires this exact naming.
     binary: "{{ .ProjectName }}_v{{ .Version }}"
 
-  # push-tf-bootstrap is a separate tool, shipped in its own archive. It must
-  # not go into the provider archive: the registry expects that to contain
+  # push-tf-bootstrap is a separate tool, shipped as a binary of its own. It
+  # must not go into the provider archive: the registry expects that to contain
   # exactly one binary, named as above.
   - id: bootstrap
     main: ./cmd/push-tf-bootstrap
@@ -68,17 +67,16 @@ archives:
     formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
-  # Not zip, on any platform; see the note at the top. Windows has shipped tar
-  # since Windows 10.
+  # A bare binary, not an archive; see the note at the top. goreleaser adds
+  # .exe on Windows.
   - id: bootstrap
     ids: [bootstrap]
-    formats: [tar.gz]
-    name_template: "push-tf-bootstrap_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [binary]
+    name_template: "{{ .ProjectName }}-bootstrap_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
   algorithm: sha256
-  ids: [provider]
   # The Registry reads the protocol version from the manifest, and assumes
   # protocol 5 without it. This provider speaks protocol 6.
   extra_files:
@@ -106,7 +104,6 @@ release:
     **Experimental.** The Push Security provider is not yet generally available
     or officially supported, and may change between releases without a
     deprecation period. Contact support@pushsecurity.com before you rely on it.
-  ids: [provider]
   extra_files:
     - glob: terraform-registry-manifest.json
       name_template: "{{ .ProjectName }}_{{ .Version }}_manifest.json"
