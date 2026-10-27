@@ -46,6 +46,7 @@ type settingsResource struct {
 var (
 	_ resource.Resource                     = &settingsResource{}
 	_ resource.ResourceWithConfigure        = &settingsResource{}
+	_ resource.ResourceWithIdentity         = &settingsResource{}
 	_ resource.ResourceWithImportState      = &settingsResource{}
 	_ resource.ResourceWithConfigValidators = &settingsResource{}
 	_ resource.ResourceWithModifyPlan       = &settingsResource{}
@@ -121,6 +122,10 @@ func (r *settingsResource) ConfigValidators(context.Context) []resource.ConfigVa
 			path.MatchRoot("monitor_all_domains"),
 		),
 	}
+}
+
+func (r *settingsResource) IdentitySchema(ctx context.Context, req resource.IdentitySchemaRequest, resp *resource.IdentitySchemaResponse) {
+	singletonIdentitySchema(ctx, req, resp)
 }
 
 func (r *settingsResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -200,6 +205,7 @@ func (r *settingsResource) Create(ctx context.Context, req resource.CreateReques
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	resp.Diagnostics.Append(setSingletonIdentity(ctx, resp.Identity)...)
 	r.write(ctx, config, plan, nil, &resp.State, &resp.Diagnostics)
 }
 
@@ -211,6 +217,7 @@ func (r *settingsResource) Update(ctx context.Context, req resource.UpdateReques
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	resp.Diagnostics.Append(setSingletonIdentity(ctx, resp.Identity)...)
 	r.write(ctx, config, plan, &prior, &resp.State, &resp.Diagnostics)
 }
 
@@ -219,20 +226,27 @@ func (r *settingsResource) Read(ctx context.Context, _ resource.ReadRequest, res
 		resp.Diagnostics.AddError("Provider not configured", "The Push API client is unavailable.")
 		return
 	}
+	resp.Diagnostics.Append(setSingletonIdentity(ctx, resp.Identity)...)
 	stored, err := r.client.GetSettings(ctx)
 	if err != nil {
 		r.addAPIError(&resp.Diagnostics, "read", err)
 		return
 	}
-	domains, diags := types.SetValueFrom(ctx, types.StringType, stored.MonitoredDomains)
+	model, diags := storedSettings(ctx, stored)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, settingsModel{
+	resp.Diagnostics.Append(resp.State.Set(ctx, model)...)
+}
+
+// storedSettings is the settings as the tenant holds them.
+func storedSettings(ctx context.Context, stored *pushapi.Settings) (settingsModel, diag.Diagnostics) {
+	domains, diags := types.SetValueFrom(ctx, types.StringType, stored.MonitoredDomains)
+	return settingsModel{
 		MonitoredDomains:  domains,
 		MonitorAllDomains: types.BoolValue(stored.MonitorAllDomains),
-	})...)
+	}, diags
 }
 
 func (r *settingsResource) Delete(_ context.Context, _ resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -248,11 +262,13 @@ func (r *settingsResource) Delete(_ context.Context, _ resource.DeleteRequest, r
 
 func (r *settingsResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// One settings document per tenant, so there is nothing to identify; the
-	// identifier is ignored, and the documented convention is "default".
+	// identifier and any identity are ignored, and the documented convention
+	// is "default".
 	// Setting one attribute makes the imported state non-null, after which
 	// the framework calls Read to fill in the rest.
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("monitored_domains"),
 		types.SetValueMust(types.StringType, nil))...)
+	resp.Diagnostics.Append(setSingletonIdentity(ctx, resp.Identity)...)
 }
 
 // write sends the configured attributes that differ from prior, and records

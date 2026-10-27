@@ -10,8 +10,8 @@ import (
 //
 // It exists so that the cross-field rules have exactly one implementation.
 // They are evaluated during `terraform plan` against Terraform values, and by
-// push-tf-bootstrap against what the API returns, and those two answers must
-// agree: the point of the bootstrap report is to predict what the plan will
+// CheckStored against what the API returns, and those two answers must agree:
+// the point of checking stored configuration is to predict what the plan will
 // say.
 type RuleValues interface {
 	Mode() string
@@ -35,8 +35,7 @@ type RuleValues interface {
 // constraint that depends on a value not yet known is not checked: whichever
 // way it went would be a guess, and a wrong guess fails the plan for nothing.
 //
-// What the API returns is always known, so push-tf-bootstrap has no need of
-// it.
+// What the API returns is always known, so CheckStored has no need of it.
 type Unknowns interface {
 	// FieldUnknown reports whether a field's value is not yet known.
 	FieldUnknown(field string) bool

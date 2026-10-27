@@ -33,6 +33,7 @@ type blockedURLsResource struct {
 var (
 	_ resource.Resource                   = &blockedURLsResource{}
 	_ resource.ResourceWithConfigure      = &blockedURLsResource{}
+	_ resource.ResourceWithIdentity       = &blockedURLsResource{}
 	_ resource.ResourceWithImportState    = &blockedURLsResource{}
 	_ resource.ResourceWithValidateConfig = &blockedURLsResource{}
 )
@@ -92,6 +93,10 @@ func (r *blockedURLsResource) Schema(_ context.Context, _ resource.SchemaRequest
 	}
 }
 
+func (r *blockedURLsResource) IdentitySchema(ctx context.Context, req resource.IdentitySchemaRequest, resp *resource.IdentitySchemaResponse) {
+	singletonIdentitySchema(ctx, req, resp)
+}
+
 func (r *blockedURLsResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	client, err := clientFromProviderData(req.ProviderData)
 	if err != nil {
@@ -130,10 +135,12 @@ func (r *blockedURLsResource) ValidateConfig(ctx context.Context, req resource.V
 }
 
 func (r *blockedURLsResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	resp.Diagnostics.Append(setSingletonIdentity(ctx, resp.Identity)...)
 	r.write(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
 func (r *blockedURLsResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	resp.Diagnostics.Append(setSingletonIdentity(ctx, resp.Identity)...)
 	r.write(ctx, req.Plan, &resp.State, &resp.Diagnostics)
 }
 
@@ -142,6 +149,7 @@ func (r *blockedURLsResource) Read(ctx context.Context, req resource.ReadRequest
 		resp.Diagnostics.AddError("Provider not configured", "The Push API client is unavailable.")
 		return
 	}
+	resp.Diagnostics.Append(setSingletonIdentity(ctx, resp.Identity)...)
 
 	var prior types.Set
 	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("patterns"), &prior)...)
@@ -172,9 +180,10 @@ func (r *blockedURLsResource) Delete(ctx context.Context, _ resource.DeleteReque
 
 func (r *blockedURLsResource) ImportState(ctx context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// One list per tenant, so there is nothing to identify; by convention the
-	// identifier is "default" and it is ignored.
+	// identifier is "default", and it and any identity are ignored.
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("patterns"),
 		types.SetValueMust(types.StringType, nil))...)
+	resp.Diagnostics.Append(setSingletonIdentity(ctx, resp.Identity)...)
 }
 
 func (r *blockedURLsResource) write(ctx context.Context, plan planGetter, state stateSetter, diags *diag.Diagnostics) {

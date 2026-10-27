@@ -7,8 +7,8 @@
 package controlspec
 
 // The API's size limits. Each is a 400 at apply when exceeded, so the schema
-// checks them during plan, and push-tf-bootstrap reports a tenant that is
-// already past one.
+// checks them during plan, and CheckStored reports a tenant that is already
+// past one.
 const (
 	// MaxRules is the most rules one control or custom detection may hold.
 	MaxRules = 50

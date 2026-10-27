@@ -18,7 +18,7 @@ import (
 
 // validateRules adapts Terraform values to the constraint interface and turns
 // violations into diagnostics. The rules themselves live in controlspec so
-// that this and push-tf-bootstrap give identical answers.
+// that this and CheckStored give identical answers.
 //
 // Checking during plan matters because the API has no dry-run endpoint:
 // anything not caught here is only discovered when the apply returns a 400, by
@@ -149,6 +149,37 @@ func (v criterionValueValidator) ValidateString(_ context.Context, req validator
 	default:
 		resp.Diagnostics.AddAttributeError(req.Path, p.Summary, p.Detail)
 	}
+}
+
+// employeeMatchesNotEmptyValidator rejects an employee criterion that names
+// nobody, as the API does, saying what to write instead. It is the plan-time
+// half of the warning a read raises for a rule that names only employees the
+// tenant no longer holds.
+type employeeMatchesNotEmptyValidator struct{}
+
+func (employeeMatchesNotEmptyValidator) Description(context.Context) string {
+	return "must name at least one employee"
+}
+
+func (v employeeMatchesNotEmptyValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (employeeMatchesNotEmptyValidator) ValidateSet(_ context.Context, req validator.SetRequest, resp *validator.SetResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() || len(req.ConfigValue.Elements()) > 0 {
+		return
+	}
+	resp.Diagnostics.AddAttributeError(req.Path, "Employee criterion names nobody",
+		"An employee criterion needs at least one employee email address.\n\n"+
+			"Configuration generated from a rule that names only employees the tenant no "+
+			"longer holds looks like this. That rule applies to nobody, and to keep it that "+
+			"way, set `enabled = false` and remove `employee_ids`: a disabled rule applies to "+
+			"nobody too. To apply it to people instead, list their addresses here. Or remove "+
+			"the rule.\n\n"+
+			"Do not remove `employee_ids` and leave the rule enabled: a rule without an "+
+			"employee criterion applies to every employee. With `action = \"EXCLUDE\"`, "+
+			"though, removing `employee_ids` is right: excluding nobody is what a rule without "+
+			"one does.")
 }
 
 // ruleTextValidator checks a rule text field against what the API does with

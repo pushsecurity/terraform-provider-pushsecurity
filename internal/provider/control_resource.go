@@ -28,6 +28,7 @@ type controlResource struct {
 var (
 	_ resource.Resource                   = &controlResource{}
 	_ resource.ResourceWithConfigure      = &controlResource{}
+	_ resource.ResourceWithIdentity       = &controlResource{}
 	_ resource.ResourceWithImportState    = &controlResource{}
 	_ resource.ResourceWithValidateConfig = &controlResource{}
 )
@@ -42,6 +43,10 @@ func (r *controlResource) Metadata(_ context.Context, _ resource.MetadataRequest
 
 func (r *controlResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = buildSchema(r.spec)
+}
+
+func (r *controlResource) IdentitySchema(ctx context.Context, req resource.IdentitySchemaRequest, resp *resource.IdentitySchemaResponse) {
+	singletonIdentitySchema(ctx, req, resp)
 }
 
 func (r *controlResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -92,6 +97,7 @@ func (r *controlResource) Create(ctx context.Context, req resource.CreateRequest
 	// Create and Update are the same operation: the API has only PUT, and it
 	// replaces the whole document. The one difference is that there is no prior
 	// state to carry identifiers from, so every rule is created.
+	resp.Diagnostics.Append(setSingletonIdentity(ctx, resp.Identity)...)
 	r.write(ctx, req.Plan, nil, &resp.State, &resp.Diagnostics)
 }
 
@@ -101,6 +107,7 @@ func (r *controlResource) Update(ctx context.Context, req resource.UpdateRequest
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	resp.Diagnostics.Append(setSingletonIdentity(ctx, resp.Identity)...)
 	r.write(ctx, req.Plan, prior, &resp.State, &resp.Diagnostics)
 }
 
@@ -109,6 +116,7 @@ func (r *controlResource) Read(ctx context.Context, req resource.ReadRequest, re
 		resp.Diagnostics.AddError("Provider not configured", "The Push API client is unavailable.")
 		return
 	}
+	resp.Diagnostics.Append(setSingletonIdentity(ctx, resp.Identity)...)
 
 	prior, diags := priorRulesFromState(ctx, r.spec, req.State)
 	resp.Diagnostics.Append(diags...)
@@ -161,13 +169,15 @@ func (r *controlResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 func (r *controlResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Configuration resources are singletons: there is one configuration per
-	// control per tenant, so there is nothing to identify. The identifier is
-	// accepted and ignored; the documented convention is "default".
+	// control per tenant, so there is nothing to identify. The identifier, or
+	// the identity, is accepted and ignored; the documented convention is
+	// "default".
 	//
 	// Setting one attribute makes the imported state non-null, after which the
 	// framework calls Read to populate the rest.
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("rules"),
 		types.ListValueMust(ruleObjectType(r.spec), nil))...)
+	resp.Diagnostics.Append(setSingletonIdentity(ctx, resp.Identity)...)
 }
 
 func (r *controlResource) write(ctx context.Context, plan planGetter, prior []priorRule, state stateSetter, diags *diag.Diagnostics) {

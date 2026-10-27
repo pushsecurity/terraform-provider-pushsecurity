@@ -19,6 +19,10 @@ description: |-
 
 ## Import
 
+With Terraform 1.14 or later, `terraform query -generate-config-out` writes
+the resource and its import block for you, using the `{{ .Name }}` list
+resource. Its page shows how.
+
 Import the existing configuration before your first apply, so that the apply is
 a no-op rather than a replacement of whatever is already live.
 
@@ -29,6 +33,19 @@ import {
   id       = "default"
 }
 ```
+
+Terraform 1.12 and later also accept the resource's identity in place of `id`.
+The value is ignored, as the identifier is:
+
+```terraform
+import {
+  to       = {{ .Name }}.this
+  provider = {{ .ProviderShortName }}
+  identity = { id = "default" }
+}
+```
+
+Either way, let Terraform write the configuration:
 
 ```shell
 terraform plan -generate-config-out=generated.tf
@@ -49,3 +66,5 @@ Two things to expect:
   provider checks the API's cross-field rules during plan, so such rules are
   reported against the offending attribute before anything is
   written. Fix them as part of adoption.
+
+{{ .IdentitySchemaMarkdown | trimspace }}

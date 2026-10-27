@@ -60,7 +60,7 @@ The provider reads its configuration from the environment:
 
 | Variable | |
 | --- | --- |
-| `PUSH_API_KEY` | An API key, created under Settings in the Push admin console. A read-only key is enough for `plan` and for `push-tf-bootstrap`; `apply` needs full access. |
+| `PUSH_API_KEY` | An API key, created under Settings in the Push admin console. A read-only key is enough for `plan` and for `terraform query`; `apply` needs full access. |
 | `PUSH_BASE_URL` | Optional. The API's base URL, `https://api.pushsecurity.com` unless you have been given another. |
 
 Both can also be set as `api_key` and `base_url` in the provider block, but
@@ -84,31 +84,20 @@ a key if your own tooling reads the identifiers the API returns.
 
 ## Adoption
 
-`push-tf-bootstrap` surveys an existing tenant and writes the Terraform import
-blocks, extracts custom detection logic to files, and reports configuration the
-API will refuse to write back or the first plan will otherwise reject. It only
-reads, so a read-only key is enough.
+On Terraform 1.14 and later, `terraform query` finds the configuration a tenant
+already holds, and writes the resources and import blocks that adopt it. Every
+resource that can be imported has a list resource for it, and each result warns
+about configuration the API will refuse to write back or the first plan will
+otherwise reject. The query only reads, so a read-only key is enough.
 
 ```shell
 export PUSH_API_KEY=...
-push-tf-bootstrap -out .
-terraform plan -generate-config-out=generated.tf
+terraform query -generate-config-out=generated.tf
 ```
 
 See the [adoption guide](docs/guides/adopting-an-existing-tenant.md) for the
-remaining steps; there is one Terraform quirk in the middle worth reading about.
-
-To get `push-tf-bootstrap`, download it from the GitHub
-[releases](https://github.com/pushsecurity/terraform-provider-pushsecurity/releases):
-each provider release carries a binary of it per platform, named
-`terraform-provider-pushsecurity-bootstrap_<version>_<os>_<arch>` (with `.exe`
-on Windows) and listed in the release's signed `SHA256SUMS`. Rename it to
-`push-tf-bootstrap`, and on macOS and Linux make it executable with
-`chmod +x`. With a Go toolchain, you can instead install it from source:
-
-```shell
-go install github.com/pushsecurity/terraform-provider-pushsecurity/cmd/push-tf-bootstrap@latest
-```
+query file to start from, the remaining steps, and the route for Terraform 1.8
+to 1.13.
 
 ## Development
 
@@ -118,7 +107,7 @@ and **Reopen in Container**; the definition is in
 `tfplugindocs` and `gotestsum` at the versions CI uses.
 
 ```shell
-make build          # provider and push-tf-bootstrap
+make build          # the provider
 make install        # into GOBIN, which ~/.terraformrc dev_overrides points at
 make test           # unit tests; nothing touches a real tenant
 make lint

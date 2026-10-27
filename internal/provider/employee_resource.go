@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/identityschema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -47,6 +48,7 @@ type employeeResource struct {
 var (
 	_ resource.Resource                   = &employeeResource{}
 	_ resource.ResourceWithConfigure      = &employeeResource{}
+	_ resource.ResourceWithIdentity       = &employeeResource{}
 	_ resource.ResourceWithImportState    = &employeeResource{}
 	_ resource.ResourceWithValidateConfig = &employeeResource{}
 )
@@ -162,6 +164,23 @@ func (r *employeeResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 	}
 }
 
+// IdentitySchema identifies an employee by email address, lower-cased. The
+// tenant compares addresses ignoring case and so does this resource, so that
+// respelling one is an update in place; the identity has to agree, because it
+// may change only across a replacement. employee_id cannot serve: it is null
+// for an address the tenant does not hold.
+func (r *employeeResource) IdentitySchema(_ context.Context, _ resource.IdentitySchemaRequest, resp *resource.IdentitySchemaResponse) {
+	resp.IdentitySchema = identityschema.Schema{
+		Attributes: map[string]identityschema.Attribute{
+			"email": identityschema.StringAttribute{
+				RequiredForImport: true,
+				Description: "The employee's primary email address. Stored lower-cased; " +
+					"any case is accepted on import.",
+			},
+		},
+	}
+}
+
 func (r *employeeResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	r.client, r.resolver = providerClients(req.ProviderData, &resp.Diagnostics)
 }
@@ -201,6 +220,7 @@ func (r *employeeResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
+	resp.Diagnostics.Append(setEmployeeIdentity(ctx, resp.Identity, plan.Email.ValueString())...)
 	r.ensure(ctx, &plan, employeeModel{}, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
@@ -219,6 +239,7 @@ func (r *employeeResource) Read(ctx context.Context, req resource.ReadRequest, r
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	resp.Diagnostics.Append(setEmployeeIdentity(ctx, resp.Identity, state.Email.ValueString())...)
 
 	id := state.EmployeeID.ValueString()
 	if id == "" {
@@ -298,6 +319,7 @@ func (r *employeeResource) Update(ctx context.Context, req resource.UpdateReques
 		return
 	}
 
+	resp.Diagnostics.Append(setEmployeeIdentity(ctx, resp.Identity, plan.Email.ValueString())...)
 	planned := plan
 	r.ensure(ctx, &plan, state, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
@@ -479,7 +501,12 @@ func (r *employeeResource) Delete(ctx context.Context, req resource.DeleteReques
 }
 
 func (r *employeeResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("email"), req, resp)
+	email := importIdentifier(ctx, req, "email", &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("email"), email)...)
+	resp.Diagnostics.Append(setEmployeeIdentity(ctx, resp.Identity, email)...)
 	// allow_unlicense is provider-side only, so the read that follows cannot
 	// supply it. Left null, the first plan after an import would be an update
 	// that sets it to its default and changes nothing.
@@ -662,4 +689,8 @@ func recordHeld(ctx context.Context, state tfsdk.State) bool {
 		return false
 	}
 	return !id.IsNull() && !id.IsUnknown() && id.ValueString() != ""
+}
+
+func setEmployeeIdentity(ctx context.Context, identity *tfsdk.ResourceIdentity, email string) diag.Diagnostics {
+	return setIdentity(ctx, identity, "email", normaliseEmail(email))
 }

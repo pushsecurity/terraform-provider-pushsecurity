@@ -48,8 +48,24 @@ Some consequences worth knowing:
 
 ## Import
 
+With Terraform 1.14 or later, `terraform query -generate-config-out` writes
+the resource and its import block for you, using the `pushsecurity_blocked_urls` list
+resource. Its page shows how.
+
 {{ codefile "shell" "examples/resources/pushsecurity_blocked_urls/import.sh" }}
+
+In Terraform 1.12 and later, an import block can name the list by its identity
+instead. The value is ignored, as the identifier is:
+
+```terraform
+import {
+  to       = pushsecurity_blocked_urls.this
+  identity = { id = "default" }
+}
+```
 
 Imported state holds the patterns converted back from the canonical form, so
 `example.com/*` comes back as `example.com`. Both mean the same thing; adjust
 the spelling to taste, as the first plan will be empty either way.
+
+{{ .IdentitySchemaMarkdown | trimspace }}

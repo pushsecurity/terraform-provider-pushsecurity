@@ -5,15 +5,10 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 .DEFAULT_GOAL := build
 
-# The provider binary and push-tf-bootstrap, in the repository root.
+# The provider binary, in the repository root.
 .PHONY: build
-build: bootstrap
+build:
 	go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY) .
-
-# The adoption tool. `make install` installs it alongside the provider.
-.PHONY: bootstrap
-bootstrap:
-	go build -o push-tf-bootstrap ./cmd/push-tf-bootstrap
 
 # `dev_overrides` in ~/.terraformrc points at GOBIN, so installing is the whole
 # dev loop: no init, no version bump, no registry.
@@ -55,4 +50,4 @@ docs-check: docs
 
 .PHONY: clean
 clean:
-	rm -rf dist/ $(BINARY) push-tf-bootstrap
+	rm -rf dist/ $(BINARY)

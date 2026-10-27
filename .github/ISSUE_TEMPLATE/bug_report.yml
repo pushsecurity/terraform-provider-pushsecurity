@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in the provider or push-tf-bootstrap does not work as documented.
+description: Something in the provider does not work as documented.
 labels: [bug]
 body:
   - type: markdown

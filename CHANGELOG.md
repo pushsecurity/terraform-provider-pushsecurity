@@ -23,14 +23,21 @@ First public release.
 - `pushsecurity_custom_detection`, `pushsecurity_blocked_urls` and `pushsecurity_settings`.
 - `pushsecurity_employee`, `pushsecurity_employee_merge` and `pushsecurity_employee_merge_rule`.
 
+Every resource except `pushsecurity_employee_merge` and
+`pushsecurity_employee_merge_rule` has a resource identity, so Terraform 1.12
+and later can import it with `identity` in an import block in place of `id`.
+
+### List resources
+
+- Every control and telemetry configuration, `pushsecurity_custom_detection`,
+  `pushsecurity_blocked_urls`, `pushsecurity_settings` and
+  `pushsecurity_employee` has a list resource, so Terraform 1.14 and later can
+  find a tenant's existing configuration with `terraform query` and write the
+  resources and import blocks that adopt it. Results warn about configuration
+  the first plan will reject.
+
 ### Data sources
 
 - `pushsecurity_app`, `pushsecurity_apps`, `pushsecurity_app_categories`, `pushsecurity_custom_detections`,
   `pushsecurity_employee` and `pushsecurity_employees`.
 
-### Tools
-
-- `push-tf-bootstrap`, which surveys an existing tenant and writes the import
-  blocks and detection logic files to adopt it. Each provider release carries
-  a binary of it per platform, named
-  `terraform-provider-pushsecurity-bootstrap_<version>_<os>_<arch>`.

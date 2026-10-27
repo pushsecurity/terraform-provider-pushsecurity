@@ -61,4 +61,21 @@ merge has happened.
 
 ## Import
 
+With Terraform 1.14 or later, `terraform query -generate-config-out` writes
+the resources and their import blocks for the employees you filter it to,
+using the `pushsecurity_employee` list resource. Its page shows how.
+
 {{ codefile "shell" "examples/resources/pushsecurity_employee/import.sh" }}
+
+In Terraform 1.12 and later, an import block can name the employee by identity
+instead. The address is compared ignoring case, and the resource takes it as
+written:
+
+```terraform
+import {
+  to       = pushsecurity_employee.ada_lovelace
+  identity = { email = "ada.lovelace@example.com" }
+}
+```
+
+{{ .IdentitySchemaMarkdown | trimspace }}

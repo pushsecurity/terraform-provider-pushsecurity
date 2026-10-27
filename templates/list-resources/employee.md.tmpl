@@ -1,0 +1,52 @@
+---
+page_title: "{{ .Name }} List Resource - {{ .ProviderName }}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{ .Name }} (List Resource)
+
+{{ .Description | trimspace }}
+
+List resources need Terraform 1.14 or later.
+
+## Example usage
+
+Most of a tenant's employees come from directory sync and are better left to
+it, so filter the list to the people you mean to manage. Put the list block in
+a file ending in `.tfquery.hcl`, beside your configuration:
+
+{{ tffile .ExampleFile }}
+
+Then let Terraform write the resources and their import blocks:
+
+```shell
+terraform query -generate-config-out=generated.tf
+```
+
+- **Every list block needs `provider = {{ .ProviderShortName }}`**, or the query
+  fails.
+- **Keep the `provider` block and `required_providers` in a `.tf` file.** A
+  `.tfquery.hcl` file cannot hold a `terraform` block. A `provider` block in
+  one is used by the query alone, and plan then configures the provider without
+  it.
+- **`generated.tf` must not exist yet.** Terraform only writes generated
+  configuration to a new file.
+
+Move the generated resources into your configuration and run `terraform apply`
+to record the imports. Leave the `provider` argument on the resources and the
+import blocks: the plan accepts both. The resources are named after the list
+block, `admins_0`, `admins_1` and so on, in order of email address.
+
+The generated resources set `first_name`, `last_name` and `licensed`, so
+Terraform manages all three from then on. Remove any you mean to leave to the
+console or to directory sync. `allow_unlicense` is generated as `false`.
+
+## Limit
+
+Terraform stops at 100 results unless the list block sets `limit`. When more
+employees match, the first result carries a warning saying how many were left
+out. Narrow the filters rather than raising the limit.
+
+{{ .SchemaMarkdown | trimspace }}

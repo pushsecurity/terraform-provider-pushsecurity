@@ -20,8 +20,12 @@ import (
 	"github.com/pushsecurity/terraform-provider-pushsecurity/internal/provider/controlspec"
 )
 
-// actionInclude is the server's default for an excludable condition's action.
-const actionInclude = "INCLUDE"
+// The actions an excludable condition takes. actionInclude is the server's
+// default.
+const (
+	actionInclude = "INCLUDE"
+	actionExclude = "EXCLUDE"
+)
 
 func buildSchema(s controlspec.Spec) schema.Schema {
 	attrs := map[string]schema.Attribute{
@@ -287,6 +291,16 @@ func buildCriteriaAttributes(s controlspec.Spec) map[string]schema.Attribute {
 			// way it is a 400.
 			setvalidator.SizeBetween(1, c.MatchesLimit()),
 		}
+		if c.ResolvesEmails() {
+			// An empty employee list is what configuration generated from a
+			// rule naming only departed employees holds, and the obvious fix,
+			// removing the criterion, widens the rule to everyone. Say so
+			// where the plan fails, which may be well after the warning.
+			matchesValidators = []validator.Set{
+				setvalidator.SizeAtMost(c.MatchesLimit()),
+				employeeMatchesNotEmptyValidator{},
+			}
+		}
 		if len(c.Enum) > 0 {
 			matchesDesc += " Any of " + controlspec.Backticked(c.Enum) + "."
 			matchesValidators = append(matchesValidators,
@@ -329,7 +343,7 @@ func buildCriteriaAttributes(s controlspec.Spec) map[string]schema.Attribute {
 					"(`INCLUDE`) or to everything except them (`EXCLUDE`). Defaults to " +
 					"`INCLUDE`.",
 				Validators: []validator.String{
-					stringvalidator.OneOf(actionInclude, "EXCLUDE"),
+					stringvalidator.OneOf(actionInclude, actionExclude),
 				},
 			}
 		}
