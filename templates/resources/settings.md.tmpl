@@ -42,6 +42,10 @@ the plan show the change itself.
 
 ## Import
 
+With Terraform 1.14 or later, `terraform query -generate-config-out` writes
+the resource and its import block for you, using the `pushsecurity_settings` list
+resource. Its page shows how.
+
 {{ codefile "shell" "examples/resources/pushsecurity_settings/import.sh" }}
 
 Or with an import block, which also lets Terraform generate the configuration:
@@ -54,6 +58,20 @@ import {
 }
 ```
 
+Terraform 1.12 and later also accept the resource's identity in place of `id`.
+The value is ignored, as the identifier is:
+
+```terraform
+import {
+  to       = pushsecurity_settings.this
+  provider = pushsecurity
+  identity = { id = "default" }
+}
+```
+
+
 Remove the `provider` argument before applying — Terraform only accepts it on
 import blocks that generate configuration. Generated configuration sets both
 attributes; delete either one you want to leave to the console.
+
+{{ .IdentitySchemaMarkdown | trimspace }}

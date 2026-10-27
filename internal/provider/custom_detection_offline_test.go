@@ -128,6 +128,37 @@ func TestCustomDetection_deletedOutsideTerraform(t *testing.T) {
 	})
 }
 
+// TestCustomDetection_generatedConfigNamingOnlyDepartedEmployees is the
+// control tests of the same name for a detection's rules, which are read
+// through the same code: an exclusion of departed employees only imports as
+// no employee criterion, an inclusion fails plan saying what to write.
+func TestCustomDetection_generatedConfigNamingOnlyDepartedEmployees(t *testing.T) {
+	for _, tc := range []struct {
+		action string
+		error  *regexp.Regexp
+	}{
+		{"EXCLUDE", nil},
+		{"INCLUDE", regexp.MustCompile(`Employee criterion names nobody`)},
+	} {
+		t.Run(tc.action, func(t *testing.T) {
+			stub := offlineTenant(t)
+			eventType := stub.seedDetection("Tf acceptance detection", testDetectionLogic,
+				seedDepartedRule(tc.action, map[string]any{"severity": "LOW"}))
+			log := &diagnosticLog{}
+
+			step := generatedImport(testDetection, eventType)
+			step.ExpectError = tc.error
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: log.factories(),
+				Steps:                    []resource.TestStep{step},
+			})
+			if !log.warned(departedEmployeeWarning) {
+				t.Errorf("no warning %q was raised", departedEmployeeWarning)
+			}
+		})
+	}
+}
+
 // TestCustomDetection_nameInUse: creating a detection whose name derives an
 // identifier the tenant already holds fails with the import to run instead,
 // and running it adopts the detection without disturbing its rule's identity.

@@ -13,9 +13,8 @@ import (
 // state from what the API returns, so the apply fails with "Provider produced
 // inconsistent result after apply". Writing the escaped form does not help
 // either: the API keeps it as written, but these fields are shown to the user
-// as plain text, so the user sees `&amp;`. A tenant adopted with
-// push-tf-bootstrap holds exactly that. subtext is exempt: the API returns its
-// markdown as written.
+// as plain text, so the user sees `&amp;`. An adopted tenant holds exactly
+// that. subtext is exempt: the API returns its markdown as written.
 //
 // Every text field, subtext included, is rejected if it contains the word
 // "javascript" in any case, with an HTTP 500 rather than a validation error.

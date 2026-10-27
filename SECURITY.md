@@ -14,8 +14,7 @@ credit you in the release notes if you would like to be credited.
 
 ## Scope
 
-This policy covers the provider and `push-tf-bootstrap`, which are both in this
-repository. Vulnerabilities in the Push Security platform itself, including its
+This policy covers the provider in this repository. Vulnerabilities in the Push Security platform itself, including its
 API and browser extension, are covered by Push Security's own disclosure
 process, not this one.
 
@@ -28,5 +27,4 @@ it.
 ## Verifying a release
 
 Every release's `SHA256SUMS` file is signed with Push Security's release key.
-Terraform verifies provider downloads against that signature automatically. The
-`push-tf-bootstrap` releases carry a signed checksums file of their own.
+Terraform verifies provider downloads against that signature automatically.

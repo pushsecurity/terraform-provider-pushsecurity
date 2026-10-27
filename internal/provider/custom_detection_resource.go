@@ -14,10 +14,12 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/identityschema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
@@ -39,6 +41,7 @@ type customDetectionResource struct {
 var (
 	_ resource.Resource                   = &customDetectionResource{}
 	_ resource.ResourceWithConfigure      = &customDetectionResource{}
+	_ resource.ResourceWithIdentity       = &customDetectionResource{}
 	_ resource.ResourceWithImportState    = &customDetectionResource{}
 	_ resource.ResourceWithValidateConfig = &customDetectionResource{}
 )
@@ -129,6 +132,20 @@ func (r *customDetectionResource) Schema(_ context.Context, _ resource.SchemaReq
 	}
 }
 
+// IdentitySchema identifies a detection by its detection event type, which
+// never changes: a rename is a replacement.
+func (r *customDetectionResource) IdentitySchema(_ context.Context, _ resource.IdentitySchemaRequest, resp *resource.IdentitySchemaResponse) {
+	resp.IdentitySchema = identityschema.Schema{
+		Attributes: map[string]identityschema.Attribute{
+			"detection_event_type": identityschema.StringAttribute{
+				RequiredForImport: true,
+				Description: "The detection's permanent identifier, which the API derives " +
+					"from its name on creation, for example CUSTOM_TORRENT_WEBSITE_VISIT.",
+			},
+		},
+	}
+}
+
 func (r *customDetectionResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	r.client, r.resolver = providerClients(req.ProviderData, &resp.Diagnostics)
 }
@@ -183,6 +200,7 @@ func (r *customDetectionResource) Create(ctx context.Context, req resource.Creat
 	ids := returnedIDs(stored.Rules)
 	resp.Diagnostics.Append(r.setState(ctx, &resp.State, stored,
 		keyByID(planned, ids), emailsByID(planned, ids))...)
+	resp.Diagnostics.Append(setDetectionIdentity(ctx, resp.Identity, stored.DetectionEventType)...)
 }
 
 // timedOutCreateWait is how long a create that timed out is given to land, and
@@ -351,6 +369,7 @@ func (r *customDetectionResource) Read(ctx context.Context, req resource.ReadReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	resp.Diagnostics.Append(setDetectionIdentity(ctx, resp.Identity, det.ValueString())...)
 
 	prior, diags := priorRulesFromState(ctx, ruleSpec, req.State)
 	resp.Diagnostics.Append(diags...)
@@ -409,6 +428,7 @@ func (r *customDetectionResource) Update(ctx context.Context, req resource.Updat
 		return
 	}
 	resp.Diagnostics.Append(carryIDs(planned, prior, "custom_detection")...)
+	resp.Diagnostics.Append(setDetectionIdentity(ctx, resp.Identity, det.ValueString())...)
 
 	stored, err := r.client.UpdateCustomDetection(ctx, det.ValueString(), logic.ValueString(), apiRules(planned))
 	if err != nil {
@@ -444,8 +464,12 @@ func (r *customDetectionResource) Delete(ctx context.Context, req resource.Delet
 
 func (r *customDetectionResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Custom detections have real identity, so the import identifier is the
-	// detectionEventType, e.g. CUSTOM_TORRENT_WEBSITE_VISIT.
-	id := strings.TrimSpace(req.ID)
+	// detectionEventType, e.g. CUSTOM_TORRENT_WEBSITE_VISIT, given either as
+	// the identifier or as the identity.
+	id := strings.TrimSpace(importIdentifier(ctx, req, "detection_event_type", &resp.Diagnostics))
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	if id == "" {
 		resp.Diagnostics.AddError(
 			"Missing import identifier",
@@ -455,6 +479,11 @@ func (r *customDetectionResource) ImportState(ctx context.Context, req resource.
 		return
 	}
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("detection_event_type"), id)...)
+	resp.Diagnostics.Append(setDetectionIdentity(ctx, resp.Identity, id)...)
+}
+
+func setDetectionIdentity(ctx context.Context, identity *tfsdk.ResourceIdentity, detectionEventType string) diag.Diagnostics {
+	return setIdentity(ctx, identity, "detection_event_type", detectionEventType)
 }
 
 func (r *customDetectionResource) setState(ctx context.Context, state stateSetter, det *pushapi.CustomDetection, keys map[string]string, emails map[string][]string) diag.Diagnostics {

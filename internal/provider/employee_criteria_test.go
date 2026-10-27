@@ -167,10 +167,10 @@ func TestEmailsFromIDsKeepsConfiguredAddressForAnOffboardedEmployee(t *testing.T
 	// control meant to exclude someone.
 	res := testResolver(t, &employeeStub{employees: testEmployees})
 
-	got, diags := emailsFromIDs(context.Background(), res,
+	got, _, diags := emailsFromIDs(context.Background(), res,
 		[]string{"id-adam", "id-departed"},
 		[]string{"adam@example.com", "departed@example.com"},
-		"cloned_login_page_detection", "Block: contractors")
+		"EXCLUDE", "cloned_login_page_detection", "Block: contractors")
 
 	if diags.HasError() {
 		t.Fatalf("unexpected error: %v", diags.Errors())
@@ -199,9 +199,9 @@ func TestEmailsFromIDsWarnsOnImportOfADanglingReference(t *testing.T) {
 	// represented. It must be reported.
 	res := testResolver(t, &employeeStub{employees: testEmployees})
 
-	got, diags := emailsFromIDs(context.Background(), res,
+	got, namesNobody, diags := emailsFromIDs(context.Background(), res,
 		[]string{"id-adam", "id-departed"}, nil,
-		"cloned_login_page_detection", "Block: contractors")
+		"EXCLUDE", "cloned_login_page_detection", "Block: contractors")
 
 	if len(diags.Warnings()) != 1 {
 		t.Fatalf("got %d warnings, want 1", len(diags.Warnings()))
@@ -212,6 +212,70 @@ func TestEmailsFromIDsWarnsOnImportOfADanglingReference(t *testing.T) {
 	if !slices.Equal(got, []string{"adam@example.com"}) {
 		t.Errorf("got %v, want only the address that resolved", got)
 	}
+	if namesNobody {
+		t.Error("namesNobody = true, but the rule still names someone the tenant holds")
+	}
+}
+
+func TestEmailsFromIDsSaysWhatToWriteForARuleThatNamesNobody(t *testing.T) {
+	// A rule naming only departed employees applies to nobody, which no
+	// configuration says, and the obvious edit — removing the criterion —
+	// applies it to everyone. The warning has to say what to write instead.
+	res := testResolver(t, &employeeStub{employees: testEmployees})
+
+	got, namesNobody, diags := emailsFromIDs(context.Background(), res,
+		[]string{"id-departed"}, nil, "INCLUDE", "cloned_login_page_detection", "Block: contractors")
+
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags.Errors())
+	}
+	if !namesNobody {
+		t.Error("namesNobody = false, want true")
+	}
+	if len(got) != 0 {
+		t.Errorf("got %v, want no addresses", got)
+	}
+	if len(diags.Warnings()) != 1 {
+		t.Fatalf("got %d warnings, want 1", len(diags.Warnings()))
+	}
+	for _, want := range []string{"applies to nobody", "`enabled = false`", "every employee"} {
+		if !strings.Contains(diags.Warnings()[0].Detail(), want) {
+			t.Errorf("warning does not mention %q: %s", want, diags.Warnings()[0].Detail())
+		}
+	}
+}
+
+func TestEmployeeCriterionNamingNobodyIsReadByAction(t *testing.T) {
+	// Excluding nobody is having no employee criterion, so that is how it is
+	// read. Including nobody has no equivalent, so state keeps the condition
+	// with no addresses rather than widening the rule.
+	spec := controlspec.ClonedLoginPageDetection
+	res := testResolver(t, &employeeStub{employees: testEmployees})
+
+	for action, wantNull := range map[string]bool{"EXCLUDE": true, "INCLUDE": false} {
+		api := map[string]pushapi.Condition{
+			"employeeIds": {Action: action, Matches: []string{"id-departed"}},
+		}
+		back, diags := criteriaFromAPI(context.Background(), spec, res, api, nil, "a rule")
+		if diags.HasError() {
+			t.Fatalf("%s: criteriaFromAPI: %v", action, diags.Errors())
+		}
+		if len(diags.Warnings()) != 1 {
+			t.Errorf("%s: got %d warnings, want 1", action, len(diags.Warnings()))
+		}
+		cond := back.(types.Object).Attributes()["employee_ids"].(types.Object)
+		if cond.IsNull() != wantNull {
+			t.Errorf("%s: employee_ids null = %v, want %v", action, cond.IsNull(), wantNull)
+		}
+		if !wantNull {
+			if got := cond.Attributes()["action"].(types.String).ValueString(); got != action {
+				t.Errorf("%s: action = %q", action, got)
+			}
+			if got := matchesOf(t, back); len(got) != 0 {
+				t.Errorf("%s: matches = %v, want none", action, got)
+			}
+		}
+	}
 }
 
 func TestEmailsFromIDsKeepsAConsoleSideAdditionVisible(t *testing.T) {
@@ -219,10 +283,10 @@ func TestEmailsFromIDsKeepsAConsoleSideAdditionVisible(t *testing.T) {
 	// hide the person somebody added in the console.
 	res := testResolver(t, &employeeStub{employees: testEmployees})
 
-	got, diags := emailsFromIDs(context.Background(), res,
+	got, _, diags := emailsFromIDs(context.Background(), res,
 		[]string{"id-adam", "id-jo", "id-departed"},
 		[]string{"adam@example.com", "departed@example.com"},
-		"cloned_login_page_detection", "Block: contractors")
+		"EXCLUDE", "cloned_login_page_detection", "Block: contractors")
 
 	if diags.HasError() {
 		t.Fatalf("unexpected error: %v", diags.Errors())
@@ -241,8 +305,8 @@ func TestEmailsFromIDsKeepsStateWhenTheEmployeeListCannotBeRead(t *testing.T) {
 	res := testResolver(t, &employeeStub{employees: testEmployees, fail: true})
 
 	prior := []string{"adam@example.com"}
-	got, diags := emailsFromIDs(context.Background(), res, []string{"id-adam"}, prior,
-		"cloned_login_page_detection", "a rule")
+	got, _, diags := emailsFromIDs(context.Background(), res, []string{"id-adam"}, prior,
+		"INCLUDE", "cloned_login_page_detection", "a rule")
 
 	if diags.HasError() {
 		t.Fatalf("a failed lookup should warn, not error: %v", diags.Errors())

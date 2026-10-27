@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/list"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
@@ -25,6 +26,8 @@ const (
 	envAPIKey  = "PUSH_API_KEY"
 	envBaseURL = "PUSH_BASE_URL"
 )
+
+var _ provider.ProviderWithListResources = &pushProvider{}
 
 type pushProvider struct {
 	// version is set at build time and reported in the User-Agent.
@@ -156,6 +159,7 @@ func (p *pushProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 	data := &providerData{client: client, resolver: newEmployeeResolver(client)}
 	resp.DataSourceData = data
 	resp.ResourceData = data
+	resp.ListResourceData = data
 }
 
 func (p *pushProvider) Resources(_ context.Context) []func() resource.Resource {
@@ -181,6 +185,22 @@ func (p *pushProvider) Resources(_ context.Context) []func() resource.Resource {
 	// destroy leaves alone.
 	out = append(out, newSettingsResource)
 	return out
+}
+
+// ListResources are what terraform query finds existing configuration with,
+// which is how a tenant is adopted. Every resource that can be imported has
+// one.
+func (p *pushProvider) ListResources(_ context.Context) []func() list.ListResource {
+	out := make([]func() list.ListResource, 0, len(controlspec.All)+4)
+	for _, spec := range controlspec.All {
+		out = append(out, newControlListResource(spec))
+	}
+	return append(out,
+		newCustomDetectionListResource,
+		newBlockedURLsListResource,
+		newSettingsListResource,
+		newEmployeeListResource,
+	)
 }
 
 func (p *pushProvider) DataSources(_ context.Context) []func() datasource.DataSource {

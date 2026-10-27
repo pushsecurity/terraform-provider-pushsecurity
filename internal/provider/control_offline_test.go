@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -15,8 +16,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 
 	"github.com/pushsecurity/terraform-provider-pushsecurity/internal/provider/controlspec"
 	"github.com/pushsecurity/terraform-provider-pushsecurity/internal/pushapi"
@@ -340,6 +343,120 @@ func TestControlResource_adoption(t *testing.T) {
 			},
 		},
 	})
+}
+
+// departedEmployeeWarning is what a read raises for a rule naming an employee
+// the tenant no longer holds; its detail is pinned in employee_criteria_test.go.
+const departedEmployeeWarning = "Rule names an employee the tenant no longer holds"
+
+// seedDepartedRule seeds one rule whose employee criterion names only an
+// employee the tenant no longer holds: the stub holds no employees at all.
+func seedDepartedRule(action string, extra map[string]any) map[string]any {
+	rule := map[string]any{
+		"name": "Departed", "enabled": true, "mode": "MONITOR",
+		"criteria": map[string]any{
+			"employeeIds": map[string]any{"matches": []any{"departed-employee-id"}, "action": action},
+		},
+	}
+	for k, v := range extra {
+		rule[k] = v
+	}
+	return rule
+}
+
+// generatedImport is an import step whose resource block Terraform generates
+// from the imported state, which is what `terraform plan -generate-config-out`
+// does and what `terraform query -generate-config-out` writes.
+func generatedImport(addr, id string) resource.TestStep {
+	return resource.TestStep{
+		// Only the import block is written.
+		Config:          `# generated`,
+		ResourceName:    addr,
+		ImportState:     true,
+		ImportStateKind: resource.ImportBlockWithID,
+		ImportStateId:   id,
+		GenerateConfig:  true,
+	}
+}
+
+// TestControlResource_generatedConfigExcludingOnlyDepartedEmployees: a rule
+// that excludes only employees the tenant no longer holds excludes nobody,
+// which is a rule with no employee criterion, so that is how it is read and
+// the configuration generated from it imports with an empty plan.
+func TestControlResource_generatedConfigExcludingOnlyDepartedEmployees(t *testing.T) {
+	stub := offlineTenant(t)
+	stub.seedControl(controlspec.FileDownloadBlocking, seedDepartedRule("EXCLUDE", nil))
+	log := &diagnosticLog{}
+
+	step := generatedImport(testResource, "default")
+	step.ImportPlanChecks.PreApply = []plancheck.PlanCheck{
+		plancheck.ExpectKnownValue(testResource,
+			tfjsonpath.New("rules").AtSliceIndex(0).AtMapKey("criteria").AtMapKey("employee_ids"),
+			knownvalue.Null()),
+	}
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: log.factories(),
+		Steps:                    []resource.TestStep{step},
+	})
+	if !log.warned(departedEmployeeWarning) {
+		t.Errorf("no warning %q was raised", departedEmployeeWarning)
+	}
+}
+
+// TestControlResource_generatedConfigIncludingOnlyDepartedEmployees: a rule
+// that applies only to employees the tenant no longer holds applies to nobody,
+// which configuration cannot say. The generated configuration fails plan with
+// what to write instead, and writing it — the rule disabled, its employee
+// criterion gone — adopts the rule.
+func TestControlResource_generatedConfigIncludingOnlyDepartedEmployees(t *testing.T) {
+	stub := offlineTenant(t)
+	spec := controlspec.FileDownloadBlocking
+	stub.seedControl(spec, seedDepartedRule("INCLUDE", nil))
+	log := &diagnosticLog{}
+
+	generated := generatedImport(testResource, "default")
+	generated.ExpectError = regexp.MustCompile(`(?s)Employee criterion names nobody.*enabled = false`)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: log.factories(),
+		Steps: []resource.TestStep{
+			generated,
+			{
+				Config: `
+import {
+  to = pushsecurity_file_download_blocking.test
+  id = "default"
+}
+
+resource "pushsecurity_file_download_blocking" "test" {
+  rules = [{ name = "Departed", enabled = false, mode = "MONITOR" }]
+}
+`,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(testResource, plancheck.ResourceActionUpdate),
+					},
+					PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+				Check: func(*terraform.State) error {
+					rules := stub.rules(spec)
+					if len(rules) != 1 {
+						return fmt.Errorf("the tenant holds %d rules, want 1", len(rules))
+					}
+					if rules[0]["enabled"] != false {
+						return fmt.Errorf("the rule is stored enabled = %v, want false", rules[0]["enabled"])
+					}
+					if crit, _ := rules[0]["criteria"].(map[string]any); crit["employeeIds"] != nil {
+						return fmt.Errorf("the rule still holds an employee criterion: %v", crit["employeeIds"])
+					}
+					return nil
+				},
+			},
+		},
+	})
+	if !log.warned(departedEmployeeWarning) {
+		t.Errorf("no warning %q was raised", departedEmployeeWarning)
+	}
 }
 
 // TestControlResource_enumSetField covers the one field type the file

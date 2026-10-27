@@ -8,4 +8,8 @@ provider/provider.tf              docs/index.md
 resources/<name>/resource.tf      docs/resources/<name>.md
 resources/<name>/import.sh        the import section of that page
 data-sources/<name>/data-source.tf  docs/data-sources/<name>.md
+list-resources/<name>/list-resource.tfquery.hcl  docs/list-resources/<name>.md
 ```
+
+Most list resource pages render their example from the template, so only
+`pushsecurity_custom_detection` has an example file.

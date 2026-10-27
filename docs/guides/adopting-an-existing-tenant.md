@@ -21,43 +21,148 @@ owns its control in full: the API replaces the whole document on every write.
 An apply against an incomplete configuration does not merge, it replaces. So
 import first.
 
-Adopt one control at a time. A control is either fully Terraform-managed or
-fully console-managed; there is no middle ground.
+A control is either fully Terraform-managed or fully console-managed; there is
+no middle ground. Adopt only what you mean Terraform to own from now on.
 
-## 1. Survey the tenant
+## 1. Find the configuration with `terraform query`
 
-`push-tf-bootstrap` reads the tenant and writes the import blocks for you. It
-never writes to the API, so a read-only key is enough:
+This needs Terraform 1.14 or later; for older versions see
+[Terraform 1.8 to 1.13](#terraform-18-to-113). The query only reads, so a
+read-only key is enough.
+
+Put a list block for each kind of configuration in a file ending in
+`.tfquery.hcl`, beside your configuration. This one lists everything the
+provider can adopt; delete the blocks for anything you mean to leave to the
+console:
+
+```terraform
+# Every list resource the provider has. terraform query reads this file, and
+# with -generate-config-out writes a resource and an import block for each
+# result. Delete the blocks for anything you mean to leave to the console.
+#
+# The provider block and required_providers stay in a .tf file beside it.
+
+list "pushsecurity_account_condition_enforcement" "adopted" {
+  provider = pushsecurity
+}
+
+list "pushsecurity_app_banner" "adopted" {
+  provider = pushsecurity
+}
+
+list "pushsecurity_app_banner_url_pattern" "adopted" {
+  provider = pushsecurity
+}
+
+list "pushsecurity_browser_extension_blocking" "adopted" {
+  provider = pushsecurity
+}
+
+list "pushsecurity_clipboard_blocking" "adopted" {
+  provider = pushsecurity
+}
+
+list "pushsecurity_cloned_login_page_detection" "adopted" {
+  provider = pushsecurity
+}
+
+list "pushsecurity_file_download_blocking" "adopted" {
+  provider = pushsecurity
+}
+
+list "pushsecurity_file_download_telemetry" "adopted" {
+  provider = pushsecurity
+}
+
+list "pushsecurity_file_upload_blocking" "adopted" {
+  provider = pushsecurity
+}
+
+list "pushsecurity_file_upload_telemetry" "adopted" {
+  provider = pushsecurity
+}
+
+list "pushsecurity_malicious_browser_extension_detection" "adopted" {
+  provider = pushsecurity
+}
+
+list "pushsecurity_malicious_copy_paste_detection" "adopted" {
+  provider = pushsecurity
+}
+
+list "pushsecurity_mfa_enforcement" "adopted" {
+  provider = pushsecurity
+}
+
+list "pushsecurity_password_logging_prevention" "adopted" {
+  provider = pushsecurity
+}
+
+list "pushsecurity_phishing_tool_detection" "adopted" {
+  provider = pushsecurity
+}
+
+list "pushsecurity_strong_password_enforcement" "adopted" {
+  provider = pushsecurity
+}
+
+list "pushsecurity_blocked_urls" "adopted" {
+  provider = pushsecurity
+}
+
+list "pushsecurity_settings" "adopted" {
+  provider = pushsecurity
+}
+
+list "pushsecurity_custom_detection" "adopted" {
+  provider = pushsecurity
+
+  # Terraform stops at 100 results unless told otherwise.
+  limit = 1000
+}
+
+# Employees mostly come from directory sync. Adopt only the ones you mean to
+# manage here.
+list "pushsecurity_employee" "adopted" {
+  provider = pushsecurity
+
+  config {
+    groups = ["Push administrators"]
+  }
+}
+```
+
+Keep the `provider` block and `required_providers` in a `.tf` file. A
+`.tfquery.hcl` file cannot hold a `terraform` block, and a `provider` block in
+one is used by the query alone: plan then configures the provider without it.
 
 ```shell
 export PUSH_API_KEY=...
-push-tf-bootstrap -out .
+terraform init
+terraform query -generate-config-out=generated.tf
 ```
 
-It produces:
+The query lists what it found, and writes a resource and an import block for
+each result to `generated.tf`, which must not exist yet. A control with no rules
+and no control-wide entries, and an empty blocked URL list, are left out:
+adopting them would make Terraform the owner of something nobody has
+configured, and every apply from then on would revert what is set in the
+console. Set `include_empty = true` in a list block's `config` to adopt one
+anyway.
 
-- `imports.tf` — an import block for every control that has rules, every custom
-  detection, and the blocked URL list.
-- `detections/*.yaml` — each custom detection's logic, extracted byte for byte.
-
-It also prints anything that will fail validation. See
+Read the warnings. Each is named after the resource it is about, and says what
+the first plan will reject or warn about. See
 [Configuration the API will not accept back](#configuration-the-api-will-not-accept-back).
 
-## 2. Let Terraform generate the configuration
+## 2. Move the generated resources in, and name them
 
-```shell
-terraform plan -generate-config-out=generated.tf
-```
+Move the resources and import blocks out of `generated.tf` into your own files.
+Leave the `provider` arguments where they are: the plan accepts them.
 
-The import blocks include a `provider` argument, which this step needs: without
-it Terraform looks for `hashicorp/pushsecurity` and fails.
-
-## 3. Move the generated resources in, and drop the provider arguments
-
-Move the resources out of `generated.tf` into your own files, then **delete the
-`provider` arguments from the import blocks**. Terraform only accepts that
-argument on import blocks that generate configuration; leaving it in place fails
-the next plan with `Invalid import provider argument`.
+Terraform names the resources after the list block, `adopted_0`, `adopted_1`
+and so on. Rename them now, so that the first apply records them under the
+names you will keep. Custom detections come out in order of detection event
+type, and employees in order of address.
 
 ```shell
 terraform apply     # imports; changes nothing
@@ -68,7 +173,7 @@ An empty plan here is the whole point. If it is not empty, the provider and the
 API disagree about something — that is a bug worth reporting, not something to
 apply past.
 
-## 4. Add rule keys
+## 3. Add rule keys
 
 Generated rules have `key = null`. Give each one a stable, meaningful key:
 
@@ -104,17 +209,191 @@ the keys and matching is exact. Nothing breaks if you do both at once — the
 resulting configuration is correct either way — but the identifiers will have
 moved between rules.
 
-## 5. Point detection logic at the extracted files
+## 4. Move detection logic into files
 
-Replace the generated inline `detection_logic` string with a file reference:
+Terraform writes `detection_logic` into the generated configuration as one
+escaped string. To keep it in files and read it with `file()`, write each
+detection's logic out of state, after the import apply and the renaming.
+`jq -j` writes the string exactly as stored, with no newline added:
 
-```terraform
-detection_logic = file("${path.module}/detections/torrent-website-visit.yaml")
+```shell
+mkdir -p detections
+terraform show -json > state.json
+jq -r '.values.root_module.resources[]
+       | select(.type == "pushsecurity_custom_detection") | .name' state.json |
+while read -r name; do
+  jq -j --arg n "$name" '.values.root_module.resources[]
+       | select(.type == "pushsecurity_custom_detection" and .name == $n)
+       | .values.detection_logic' state.json > "detections/$name.yaml"
+done
+rm state.json
 ```
 
-The API stores and returns detection logic byte for byte, so this is a no-op —
-and from here on a change to your detection logic reads as a diff in a YAML
-file rather than as an edited escape sequence.
+Then replace each inline `detection_logic` with a file reference:
+
+```terraform
+detection_logic = file("${path.module}/detections/torrent_website_visit.yaml")
+```
+
+The API stores and returns detection logic byte for byte, so the next plan must
+be empty — and from here on a change to your detection logic reads as a diff in
+a YAML file rather than as an edited escape sequence.
+
+## Terraform 1.8 to 1.13
+
+Without `terraform query`, write the import blocks yourself. This file has one
+for each configuration there is one of per tenant. Delete the blocks for
+anything you mean to leave to the console, and in particular for anything
+empty, which Terraform would otherwise own from the next apply on. Add one per
+custom detection, by the detection event type the
+`pushsecurity_custom_detections` data source lists:
+
+```terraform
+# For Terraform 1.8 to 1.13, which have no terraform query. An import block for
+# each configuration there is one of per tenant: delete the blocks for anything
+# you mean to leave to the console, and in particular for anything empty, which
+# Terraform would otherwise own from the next apply on.
+#
+# The provider argument is needed while Terraform generates the configuration,
+# and must be removed before the apply: see the adoption guide.
+
+import {
+  to       = pushsecurity_account_condition_enforcement.this
+  provider = pushsecurity
+  id       = "default"
+}
+
+import {
+  to       = pushsecurity_app_banner.this
+  provider = pushsecurity
+  id       = "default"
+}
+
+import {
+  to       = pushsecurity_app_banner_url_pattern.this
+  provider = pushsecurity
+  id       = "default"
+}
+
+import {
+  to       = pushsecurity_browser_extension_blocking.this
+  provider = pushsecurity
+  id       = "default"
+}
+
+import {
+  to       = pushsecurity_clipboard_blocking.this
+  provider = pushsecurity
+  id       = "default"
+}
+
+import {
+  to       = pushsecurity_cloned_login_page_detection.this
+  provider = pushsecurity
+  id       = "default"
+}
+
+import {
+  to       = pushsecurity_file_download_blocking.this
+  provider = pushsecurity
+  id       = "default"
+}
+
+import {
+  to       = pushsecurity_file_download_telemetry.this
+  provider = pushsecurity
+  id       = "default"
+}
+
+import {
+  to       = pushsecurity_file_upload_blocking.this
+  provider = pushsecurity
+  id       = "default"
+}
+
+import {
+  to       = pushsecurity_file_upload_telemetry.this
+  provider = pushsecurity
+  id       = "default"
+}
+
+import {
+  to       = pushsecurity_malicious_browser_extension_detection.this
+  provider = pushsecurity
+  id       = "default"
+}
+
+import {
+  to       = pushsecurity_malicious_copy_paste_detection.this
+  provider = pushsecurity
+  id       = "default"
+}
+
+import {
+  to       = pushsecurity_mfa_enforcement.this
+  provider = pushsecurity
+  id       = "default"
+}
+
+import {
+  to       = pushsecurity_password_logging_prevention.this
+  provider = pushsecurity
+  id       = "default"
+}
+
+import {
+  to       = pushsecurity_phishing_tool_detection.this
+  provider = pushsecurity
+  id       = "default"
+}
+
+import {
+  to       = pushsecurity_strong_password_enforcement.this
+  provider = pushsecurity
+  id       = "default"
+}
+
+import {
+  to       = pushsecurity_blocked_urls.this
+  provider = pushsecurity
+  id       = "default"
+}
+
+import {
+  to       = pushsecurity_settings.this
+  provider = pushsecurity
+  id       = "default"
+}
+
+# One per custom detection, by its detection event type. The
+# pushsecurity_custom_detections data source lists them.
+import {
+  to       = pushsecurity_custom_detection.torrent_website_visit
+  provider = pushsecurity
+  id       = "CUSTOM_TORRENT_WEBSITE_VISIT"
+}
+```
+
+The `provider` arguments are needed for the next step: without them Terraform
+looks for `hashicorp/pushsecurity` and fails.
+
+```shell
+terraform plan -generate-config-out=generated.tf
+```
+
+Terraform 1.8 also reports `attribute "rules": incorrect list element type:
+attribute "id" is required` here, once for each resource with rules. It writes
+`generated.tf` all the same, and the plan after this one is unaffected.
+Terraform 1.9 and later do not report it.
+
+Move the resources out of `generated.tf` into your own files, then **delete the
+`provider` arguments from the import blocks**. Terraform only accepts that
+argument on import blocks that generate configuration; leaving it in place fails
+the next plan with `Invalid import provider argument`. Then apply, and the plan
+after it must be empty, as in step 2. Steps 3 and 4 apply unchanged.
+
+Nothing reports the configuration the API will not accept back before you
+plan, but the plan stops on every case of it, as the next section describes.
 
 ## Configuration the API will not accept back
 
@@ -129,8 +408,9 @@ rules[0]._schema: title and subtext are required for all modes except DO_NOT_SHO
 So an import can succeed, produce an empty plan, and still fail on the first
 apply that touches that control. This provider checks the API's cross-field
 rules during plan, so you get a diagnostic naming the rule and the field instead
-of a 400 after your pull request has merged — and `push-tf-bootstrap` reports
-them up front, before you have written any configuration.
+of a 400 after your pull request has merged — and `terraform query` reports them
+up front, as a warning on each result, before you have written any
+configuration.
 
 Fix the data as part of adopting the control.
 
@@ -143,9 +423,8 @@ you apply: the fix can change what it matches.
 
 The provider also rejects values that are not supported, such as a file name
 pattern that starts with `(?i)` or a clipboard URL pattern with a query string,
-and warns about a few that work but not the way they read.
-`push-tf-bootstrap` reports these too, listing the warnings separately from what
-will stop the plan.
+and warns about a few that work but not the way they read. `terraform query`
+reports these too, in a warning separate from what will stop the plan.
 
 ## Employees named by a rule
 
@@ -165,8 +444,24 @@ sitting in an old rule looks like. The identifier cannot be turned back into an
 address, so the refresh raises a warning rather than failing — failing would
 leave no way to see or repair the rule. Directly after an import there is no
 configuration to recover the address from, so that identifier is left out of
-state and **the next apply would drop it from the rule**. The warning says so.
-Review those rules before the first apply.
+state and the next apply that writes the rule drops it. No browser belongs to an
+employee the tenant no longer holds, so that changes nothing about who the rule
+applies to.
+
+It matters when a rule names nobody else:
+
+- **`action = "EXCLUDE"`.** The rule excludes nobody, which is what a rule
+  without an employee criterion does, so it is imported as
+  `employee_ids = null`. The generated configuration plans clean.
+- **`action = "INCLUDE"`.** The rule applies to nobody, and no configuration
+  says that. State holds `employee_ids` with an empty `matches`, and the
+  generated configuration fails plan with `Employee criterion names nobody`.
+  Edit the rule: set `enabled = false` and remove `employee_ids` to keep it
+  applying to nobody, list the addresses it should apply to, or remove it.
+  **Do not remove `employee_ids` alone**: an enabled rule without an employee
+  criterion applies to every employee.
+
+The warning raised on import names each such rule and says the same.
 
 A stale identifier is worth looking for while adopting: an employee record that
 was recreated keeps the address but changes the identifier, so a rule written

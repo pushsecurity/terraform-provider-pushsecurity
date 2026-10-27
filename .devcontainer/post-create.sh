@@ -122,7 +122,7 @@ Dev container ready.
   make build / test / lint / docs        # all offline
   make testacc                           # writes to a real tenant
 
-Acceptance tests and push-tf-bootstrap need a tenant key. Put it in .env
+Acceptance tests need a tenant key. Put it in .env
 (gitignored) and let direnv load it:
 
   cp .env.example .env    # then fill in PUSH_API_KEY

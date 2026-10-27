@@ -1,13 +1,6 @@
 # Produces the artefact layout the Terraform Registry expects: one zip per
 # platform, the registry manifest, a SHA256SUMS file covering both, and a
 # detached GPG signature over it.
-#
-# push-tf-bootstrap ships in the same release, as bare binaries that SHA256SUMS
-# also lists. The Registry rejects a release holding any per-platform file,
-# zipped or not, that SHA256SUMS does not list, so the bootstrap files cannot
-# carry checksums of their own or ride in a release of their own. Listing bare
-# binaries, named after the provider, is a layout published providers already
-# ship through the Registry.
 version: 2
 
 project_name: terraform-provider-pushsecurity
@@ -45,34 +38,11 @@ builds:
     # The registry requires this exact naming.
     binary: "{{ .ProjectName }}_v{{ .Version }}"
 
-  # push-tf-bootstrap is a separate tool, shipped as a binary of its own. It
-  # must not go into the provider archive: the registry expects that to contain
-  # exactly one binary, named as above.
-  - id: bootstrap
-    main: ./cmd/push-tf-bootstrap
-    env:
-      - CGO_ENABLED=0
-    flags:
-      - -trimpath
-    ldflags:
-      - "-s -w"
-    mod_timestamp: "{{ .CommitTimestamp }}"
-    goos: [linux, darwin, windows]
-    goarch: [amd64, arm64]
-    binary: push-tf-bootstrap
-
 archives:
   - id: provider
     ids: [provider]
     formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-
-  # A bare binary, not an archive; see the note at the top. goreleaser adds
-  # .exe on Windows.
-  - id: bootstrap
-    ids: [bootstrap]
-    formats: [binary]
-    name_template: "{{ .ProjectName }}-bootstrap_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"

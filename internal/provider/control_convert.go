@@ -243,16 +243,22 @@ func resolveEmails(ctx context.Context, res *employeeResolver, emails []string, 
 // widen, without a warning, a control that was meant to exclude someone. So
 // the address the rule was last written with is kept and a warning is raised.
 // After an import there is no such address to keep, and the warning says so.
-func emailsFromIDs(ctx context.Context, res *employeeResolver, ids, priorEmails []string, controlName, ruleName string) ([]string, diag.Diagnostics) {
-	var diags diag.Diagnostics
+//
+// No browser belongs to an employee the tenant no longer holds, so such an
+// identifier matches nobody, and leaving it out of state changes nothing about
+// who the rule applies to — until nothing else is left. namesNobody reports
+// that case: every identifier is one the tenant no longer holds, and none can
+// be recovered. Configuration cannot say it with an address, so what the rule
+// does depends on action, and the warning says what to write for each.
+func emailsFromIDs(ctx context.Context, res *employeeResolver, ids, priorEmails []string, action, controlName, ruleName string) (emails []string, namesNobody bool, diags diag.Diagnostics) {
 	if len(ids) == 0 {
-		return nil, diags
+		return nil, false, diags
 	}
 
 	if res == nil {
 		// Nothing can be resolved without a client. Prior state is the best
 		// available answer; identifiers would not even validate.
-		return priorEmails, diags
+		return priorEmails, false, diags
 	}
 
 	resolved := make([]string, 0, len(ids))
@@ -265,7 +271,7 @@ func emailsFromIDs(ctx context.Context, res *employeeResolver, ids, priorEmails 
 					"provider translates back into email addresses. Listing the tenant's "+
 					"employees failed: %v\n\nState keeps the addresses it already held, so "+
 					"this refresh may be stale.", controlName, ruleName, err))
-			return priorEmails, diags
+			return priorEmails, false, diags
 		}
 		if !ok {
 			unresolved = append(unresolved, id)
@@ -275,7 +281,7 @@ func emailsFromIDs(ctx context.Context, res *employeeResolver, ids, priorEmails 
 	}
 
 	if len(unresolved) == 0 {
-		return resolved, diags
+		return resolved, false, diags
 	}
 
 	// Which configured addresses have stopped resolving? Those are the
@@ -296,6 +302,7 @@ func emailsFromIDs(ctx context.Context, res *employeeResolver, ids, priorEmails 
 		"no longer holds: %s.\n\nThis is what an offboarded employee still named by a rule "+
 		"looks like. ", controlName, ruleName, len(unresolved), strings.Join(unresolved, ", "))
 
+	namesNobody = len(resolved) == 0 && len(gone) == 0
 	switch {
 	case len(gone) == len(unresolved):
 		detail += fmt.Sprintf("State keeps the address(es) the rule was written with (%s) so "+
@@ -304,16 +311,35 @@ func emailsFromIDs(ctx context.Context, res *employeeResolver, ids, priorEmails 
 			strings.Join(gone, ", "))
 	case len(gone) > 0:
 		detail += fmt.Sprintf("Only %d of them can be matched to an address in the "+
-			"configuration (%s); the rest are kept out of state, so the next apply would "+
-			"drop them. Review the rule.", len(gone), strings.Join(gone, ", "))
-	default:
+			"configuration (%s); the rest are left out of state, and the next apply that "+
+			"writes the rule drops them. No browser belongs to an employee the tenant no "+
+			"longer holds, so that changes nothing about who the rule applies to.",
+			len(gone), strings.Join(gone, ", "))
+	case !namesNobody:
 		detail += "None of them can be matched to an address in the configuration, which is " +
-			"normal directly after an import. They are left out of state, so the next apply " +
-			"would drop them from the rule. Review the rule before applying."
+			"normal directly after an import. They are left out of state, and the next apply " +
+			"that writes the rule drops them. No browser belongs to an employee the tenant no " +
+			"longer holds, so that changes nothing about who the rule applies to."
+	case action == actionExclude:
+		detail += "The rule excludes nobody else, so it excludes nobody, which is what a rule " +
+			"without an employee criterion does. State holds it that way, as " +
+			"`employee_ids = null`, and the next apply that writes the rule sends it without " +
+			"one. Who the rule applies to does not change."
+	default:
+		detail += "The rule names nobody else, so it applies to nobody. No configuration says " +
+			"that: an employee criterion needs at least one address, and a rule without one " +
+			"applies to everyone. State holds the criterion with no addresses, which does not " +
+			"pass plan, so change the rule in configuration to one of these:\n\n" +
+			"  - To keep it applying to nobody, set `enabled = false` and remove " +
+			"`employee_ids`. A disabled rule applies to nobody too.\n" +
+			"  - To apply it to people, list their addresses in `employee_ids.matches`.\n" +
+			"  - To get rid of it, remove the rule.\n\n" +
+			"Do not remove `employee_ids` and leave the rule enabled: that applies the rule " +
+			"to every employee."
 	}
 
 	diags.AddWarning("Rule names an employee the tenant no longer holds", detail)
-	return append(resolved, gone...), diags
+	return append(resolved, gone...), namesNobody, diags
 }
 
 // rulesToState builds the state value for the rules the API returned.
@@ -450,10 +476,23 @@ func criteriaFromAPI(ctx context.Context, s controlspec.Spec, res *employeeResol
 			continue
 		}
 
+		action := cond.Action
+		if action == "" {
+			// The server echoes INCLUDE when it was omitted, but be
+			// defensive: the schema default is INCLUDE either way.
+			action = actionInclude
+		}
+
 		raw := cond.Matches
 		if c.ResolvesEmails() {
-			resolved, d := emailsFromIDs(ctx, res, raw, priorEmails, s.TypeName, ruleName)
+			resolved, namesNobody, d := emailsFromIDs(ctx, res, raw, priorEmails, action, s.TypeName, ruleName)
 			diags.Append(d...)
+			if namesNobody && action == actionExclude {
+				// Excluding nobody is having no employee criterion, which
+				// configuration can say, where an empty exclusion it cannot.
+				vals[c.Name] = types.ObjectNull(innerType)
+				continue
+			}
 			raw = resolved
 		}
 
@@ -466,12 +505,6 @@ func criteriaFromAPI(ctx context.Context, s controlspec.Spec, res *employeeResol
 
 		inner := map[string]attr.Value{"matches": set}
 		if c.Excludable {
-			action := cond.Action
-			if action == "" {
-				// The server echoes INCLUDE when it was omitted, but be
-				// defensive: the schema default is INCLUDE either way.
-				action = actionInclude
-			}
 			inner["action"] = types.StringValue(action)
 		}
 
