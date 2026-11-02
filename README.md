@@ -26,7 +26,7 @@ history and rollback come from git.
 | 14 control configurations | app banner (both kinds), MFA enforcement, password logging prevention, strong password enforcement, account condition enforcement, file download/upload blocking, clipboard blocking, browser extension blocking, malicious extension detection, cloned login page detection, phishing tool detection, malicious copy/paste detection |
 | 2 telemetry configurations | file download, file upload |
 | Custom detections | detection logic as YAML files, plus the rules that act on them |
-| Blocked URLs | the tenant's blocked URL list |
+| Blocked URLs | the tenant's blocked URL list, as a whole or one pattern at a time beside patterns other tools add |
 | Settings | the domains Push monitors as your organisation's, and whether it monitors every domain |
 | Employees | an employee's record and licence, and merging their other addresses into it, by name or by rule |
 | Data sources | employees, apps, app categories, custom detections |

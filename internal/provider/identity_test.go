@@ -78,6 +78,58 @@ func TestIdentity_blockedURLs(t *testing.T) {
 		map[string]knownvalue.Check{"id": knownvalue.StringExact("default")}, nil)
 }
 
+// TestIdentity_blockedURL: the identity is the canonical form, so a
+// respelling stays an update in place, and an identity written by hand may
+// name the pattern in either form.
+func TestIdentity_blockedURL(t *testing.T) {
+	offlineTenant(t)
+	identity := map[string]knownvalue.Check{
+		"canonical_pattern": knownvalue.StringExact("*://tf-acc-one.example.com/*"),
+	}
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		TerraformVersionChecks:   identityVersions,
+		Steps: []resource.TestStep{
+			{
+				Config:            `resource "pushsecurity_blocked_url" "test" { pattern = "tf-acc-one.example.com/*" }`,
+				ConfigStateChecks: []statecheck.StateCheck{statecheck.ExpectIdentity(testBlockedURL, identity)},
+			},
+			{
+				// Written in the short form an import reads it back in, so
+				// that the import plans nothing.
+				Config: `resource "pushsecurity_blocked_url" "test" { pattern = "tf-acc-one.example.com" }`,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(testBlockedURL, plancheck.ResourceActionUpdate),
+					},
+					PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{statecheck.ExpectIdentity(testBlockedURL, identity)},
+			},
+			{
+				ResourceName:    testBlockedURL,
+				ImportState:     true,
+				ImportStateKind: resource.ImportBlockWithResourceIdentity,
+			},
+			{
+				ResourceName:           testBlockedURL,
+				ImportState:            true,
+				ImportStateKind:        resource.ImportBlockWithResourceIdentity,
+				ImportStateConfigExact: true,
+				Config: `
+resource "pushsecurity_blocked_url" "test" { pattern = "tf-acc-one.example.com" }
+
+import {
+  to       = pushsecurity_blocked_url.test
+  identity = { canonical_pattern = "tf-acc-one.example.com" }
+}
+`,
+			},
+		},
+	})
+}
+
 func TestIdentity_settings(t *testing.T) {
 	stub := offlineTenant(t)
 	stub.seedSettings([]string{"example.com"}, true)

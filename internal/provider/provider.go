@@ -165,14 +165,16 @@ func (p *pushProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 func (p *pushProvider) Resources(_ context.Context) []func() resource.Resource {
 	// Every rule-based control resource is the same implementation driven by a
 	// different spec, so registration is a loop over the specs.
-	out := make([]func() resource.Resource, 0, len(controlspec.All)+6)
+	out := make([]func() resource.Resource, 0, len(controlspec.All)+7)
 	for _, spec := range controlspec.All {
 		out = append(out, newControlResource(spec))
 	}
-	// The two controls whose API does not follow the configuration PUT pattern.
+	// The two controls whose API does not follow the configuration PUT pattern,
+	// the blocked URL list both as a whole and one pattern at a time.
 	out = append(out,
 		newCustomDetectionResource,
 		newBlockedURLsResource,
+		newBlockedURLResource,
 	)
 	// Employee merging: not a control at all, but the same tenant, the same
 	// client, and the same email-address vocabulary as the control criteria.

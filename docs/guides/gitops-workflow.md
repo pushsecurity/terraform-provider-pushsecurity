@@ -218,4 +218,6 @@ with jittered backoff, so no special `-parallelism` setting is needed.
 `pushsecurity_blocked_urls` is the one resource whose API has no bulk replace, so
 changing it deletes the whole list and re-adds it entry by entry. Blocking is
 degraded while that runs — roughly a second per entry. Schedule changes to large
-lists accordingly.
+lists accordingly. `pushsecurity_blocked_url`, one resource per pattern, writes
+only the patterns that change and never empties the list, but cannot remove a
+pattern either: destroying one leaves it blocked.

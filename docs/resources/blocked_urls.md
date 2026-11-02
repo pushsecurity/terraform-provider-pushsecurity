@@ -11,7 +11,7 @@ Manages the tenant's blocked URL list.
 
 ~> **A change that removes a pattern rewrites the whole list, and not atomically.** The API offers no bulk replace and no way to remove a single entry, so the provider deletes the entire list and re-adds it one entry at a time. Blocking is degraded while that runs — roughly a second per entry — so such a change to a large list leaves a window in which some or all URLs are not blocked. Plan changes to this resource accordingly. A change that only adds patterns adds just those, and one that only respells patterns the list already holds sends nothing.
 
-This resource owns the whole list: an apply removes any entry not in your configuration, including entries added in the console.
+This resource owns the whole list: an apply removes any entry not in your configuration, including entries added in the console. To share the list with entries added outside Terraform, use `pushsecurity_blocked_url` instead, one resource per pattern, and never both in one tenant.
 
 ~> **Destroying this resource empties the list.** `terraform destroy` deletes every entry in the tenant's blocked URL list, including entries added in the console. Removing the resource from your configuration does the same.
 

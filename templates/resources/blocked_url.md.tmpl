@@ -1,0 +1,140 @@
+---
+page_title: "pushsecurity_blocked_url Resource - pushsecurity"
+subcategory: ""
+description: |-
+  Manages one pattern in the tenant's blocked URL list, and leaves every other entry alone.
+---
+
+# pushsecurity_blocked_url (Resource)
+
+{{ .Description | trimspace }}
+
+## Example usage
+
+{{ tffile "examples/resources/pushsecurity_blocked_url/resource.tf" }}
+
+## Sharing the list
+
+The tenant has one blocked URL list. Each `pushsecurity_blocked_url` owns one
+pattern in it, so Terraform can keep a baseline in place while other tools, such
+as an incident-response workflow, add patterns to the same list through the API:
+
+- **A pattern added outside Terraform** is not drift. Plans never show it, and
+  applies never remove it.
+- **A pattern of yours removed outside Terraform** is drift. The next plan
+  offers to add it back, and apply adds that pattern alone.
+- **A pattern the list already holds** when the resource is created, from the
+  console or any other source, is taken over as it is, without being sent
+  again.
+- **Destroy sends nothing.** See below.
+
+The patterns are written one at a time and the rest of the list is never
+rewritten, so nothing stops being blocked while an apply runs, and nothing
+another tool adds during one is lost.
+
+`pushsecurity_blocked_urls` is the other way to manage the list: one resource
+that owns all of it. Use one or the other in a tenant, never both.
+`pushsecurity_blocked_urls` removes every entry it does not list, so it would
+remove these on every apply, and these would add their patterns back on the
+next.
+
+## Destroying does not unblock
+
+The API can add a single entry to the list, but its only delete empties the
+whole list. Emptying it would remove the entries other tools added, and leave
+the list unblocked while Terraform re-added the rest. So this resource never
+removes anything. Destroying it, removing it from your configuration, or
+changing `pattern` to a different URL, which replaces it, stops Terraform
+managing the old pattern, leaves it blocked, and warns:
+
+```
+Warning: The URL is still blocked
+```
+
+To unblock the URL, remove it in the Push console.
+
+Changing only how a pattern is written is not a replacement. `example.com`,
+`example.com/` and `example.com/*` are one pattern to the API, so moving
+between them is an update in place that sends nothing.
+
+## Two formats for one value
+
+The API stores a pattern in a canonical form, `*://example.com/*` for
+`example.com`, and rejects that form when it is sent back. The provider
+converts between the two. It keeps your spelling in `pattern`, and shows the
+stored form, which is also what the console shows, in `canonical_pattern`,
+which is known during plan. A canonical pattern written in `pattern` is
+accepted and converted the same way.
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Import
+
+The import identifier is the pattern, in either form.
+
+{{ codefile "shell" "examples/resources/pushsecurity_blocked_url/import.sh" }}
+
+To take over patterns the list already holds, an import block per pattern
+does the same from configuration, in Terraform 1.7 and later:
+
+```terraform
+import {
+  for_each = toset(["known-bad.example.com", "*.phishing.example.net"])
+  to       = pushsecurity_blocked_url.baseline[each.value]
+  id       = each.value
+}
+```
+
+Creating the resource does the same without an import, since a pattern the
+list already holds is taken over, not sent again.
+
+In Terraform 1.12 and later, an import block can name the pattern by its
+identity instead, in either form:
+
+```terraform
+import {
+  to       = pushsecurity_blocked_url.baseline["known-bad.example.com"]
+  identity = { canonical_pattern = "*://known-bad.example.com/*" }
+}
+```
+
+Imported state holds the pattern in its short form, so `example.com/*` comes
+back as `example.com`. If your configuration spells it differently, the first
+plan shows an update in place that changes only the spelling, and applying it
+sends nothing.
+
+## Moving from `pushsecurity_blocked_urls`
+
+Destroying `pushsecurity_blocked_urls` empties the list, so remove it from state
+rather than destroying it, and import its patterns as `pushsecurity_blocked_url`
+resources in the same apply. In Terraform 1.7 and later:
+
+```terraform
+removed {
+  from = pushsecurity_blocked_urls.this
+
+  lifecycle {
+    destroy = false
+  }
+}
+
+locals {
+  blocked_urls = toset(["known-bad.example.com", "*.phishing.example.net"])
+}
+
+import {
+  for_each = local.blocked_urls
+  to       = pushsecurity_blocked_url.baseline[each.value]
+  id       = each.value
+}
+
+resource "pushsecurity_blocked_url" "baseline" {
+  for_each = local.blocked_urls
+  pattern  = each.value
+}
+```
+
+The plan must show the list being forgotten, the imports, and nothing else.
+Remove the `removed` and `import` blocks after the apply.
+
+{{ .IdentitySchemaMarkdown | trimspace }}
