@@ -87,7 +87,7 @@ terraform {
       source = "pushsecurity/pushsecurity"
       # Every release is a beta while the provider is experimental, and
       # Terraform only installs a beta when it is pinned exactly.
-      version = "0.1.0-beta.1"
+      version = "0.1.0-beta.2"
     }
   }
 }

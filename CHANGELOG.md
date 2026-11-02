@@ -4,7 +4,7 @@ Every release is a beta until the provider is generally available, and a beta
 may change resources, attributes and behaviour without a deprecation period.
 Each entry says what such a change means for an existing configuration.
 
-## 0.1.0-beta.2 (Unreleased)
+## 0.1.0-beta.2 (2026-11-02)
 
 ### Resources
 
