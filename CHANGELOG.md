@@ -4,7 +4,17 @@ Every release is a beta until the provider is generally available, and a beta
 may change resources, attributes and behaviour without a deprecation period.
 Each entry says what such a change means for an existing configuration.
 
-## 0.1.0-beta.1 (Unreleased)
+## 0.1.0-beta.2 (Unreleased)
+
+### Resources
+
+- `pushsecurity_blocked_url`, one pattern in the blocked URL list, for a list
+  Terraform shares with patterns added outside it, such as by an
+  incident-response workflow over the API. Destroying it leaves the URL
+  blocked, as the API cannot remove a single entry. Existing configurations
+  are unaffected: `pushsecurity_blocked_urls` still owns the whole list.
+
+## 0.1.0-beta.1 (2026-10-27)
 
 First public release.
 
